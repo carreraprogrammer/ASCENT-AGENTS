@@ -215,8 +215,6 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort) -> dict:
 
     def create_transaction(inp: dict) -> dict:
         try:
-            result = api._post("/api/v1/transactions", inp) if hasattr(api, "_post") else {}
-            # Fallback directo si el adapter no expone create directamente
             import httpx
             r = httpx.post(
                 f"{os.environ.get('DANIEL15K_API_URL', '')}/api/v1/transactions",
@@ -225,10 +223,15 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort) -> dict:
             )
             if r.status_code == 201:
                 data = r.json()["data"]
-                return {"ok": True, "id": data["id"],
+                return {"ok": True, "created": True, "id": data["id"],
                         "concept": data["attributes"]["concept"],
                         "amount": data["attributes"]["amount"],
                         "status": data["attributes"]["status"]}
+            if r.status_code == 409:
+                body = r.json()
+                return {"ok": True, "created": False, "already_existed": True,
+                        "existing_id": body.get("existing_id"),
+                        "detail": body.get("errors", [{}])[0].get("detail", "")}
             return {"ok": False, "status_code": r.status_code, "error": r.text[:300]}
         except Exception as e:
             return {"ok": False, "error": str(e)}
@@ -341,7 +344,11 @@ TOOLS = [
     },
     {
         "name": "create_transaction",
-        "description": "Registra una transacción nueva.",
+        "description": (
+            "Registra una transacción nueva. "
+            "Si devuelve already_existed=true (HTTP 409), la transacción YA EXISTE — no volver a intentar, no es un error. "
+            "La dedup la maneja la API: mismo date+amount+product+tipo = rechazado para fuentes telegram/gmail."
+        ),
         "input_schema": {
             "type": "object",
             "properties": {
