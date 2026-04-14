@@ -404,8 +404,7 @@ def _send_step_3(api: RailsApiPort, messenger: MessengerPort, ctx: dict) -> None
 
     if not active:
         ctx["abono_extra"] = 0
-        messenger.send_message("No tienes deudas activas 🎉. Pasamos al siguiente paso.")
-        _go_to_step(None, messenger, None, ctx, 4)
+        _go_to_step(api, messenger, action_id, ctx, 4)
         return
 
     if strategy == "snowball":

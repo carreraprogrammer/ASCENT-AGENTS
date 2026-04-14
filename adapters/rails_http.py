@@ -70,7 +70,7 @@ class RailsHttpAdapter(RailsApiPort):
     def get_active_pending_action(self) -> dict | None:
         try:
             data = self._get("/api/v1/pending_actions/active")
-            return data if data else None
+            return data.get("data") or None
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
                 return None
@@ -100,7 +100,8 @@ class RailsHttpAdapter(RailsApiPort):
 
     def get_financial_context(self) -> dict | None:
         try:
-            return self._get("/api/v1/financial_context")
+            data = self._get("/api/v1/financial_context")
+            return data.get("data") or None
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
                 return None

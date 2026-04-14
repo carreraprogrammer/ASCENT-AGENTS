@@ -78,7 +78,7 @@ def run_agent(
                     result = {"error": f"Unknown tool: {tool_name}"}
                 else:
                     try:
-                        result = tool_map[tool_name](**tool_input)
+                        result = tool_map[tool_name](tool_input)
                     except Exception as e:
                         logger.error("[claude_client] tool %s failed: %s", tool_name, e)
                         result = {"error": str(e)}
