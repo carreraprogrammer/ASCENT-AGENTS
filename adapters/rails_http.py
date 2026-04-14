@@ -36,13 +36,15 @@ class RailsHttpAdapter(RailsApiPort):
         url = f"{BASE_URL}{path}"
         resp = httpx.post(url, headers=_headers(), json=body, timeout=TIMEOUT)
         resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+        return data.get("data", data) if isinstance(data, dict) and "data" in data else data
 
     def _patch(self, path: str, body: dict) -> dict:
         url = f"{BASE_URL}{path}"
         resp = httpx.patch(url, headers=_headers(), json=body, timeout=TIMEOUT)
         resp.raise_for_status()
-        return resp.json()
+        data = resp.json()
+        return data.get("data", data) if isinstance(data, dict) and "data" in data else data
 
     # --- summary ---
 
@@ -101,6 +103,7 @@ class RailsHttpAdapter(RailsApiPort):
     def get_financial_context(self) -> dict | None:
         try:
             data = self._get("/api/v1/financial_context")
+            # _get no unwrapea — Rails devuelve {"data": ...}
             return data.get("data") or None
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
