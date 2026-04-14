@@ -2,15 +2,21 @@
 routers/webhook.py — POST /webhook/telegram
 
 Punto de entrada de todos los updates de Telegram.
-Lógica:
-  1. Verificar que el update viene del chat autorizado
-  2. Si hay PendingAction activo → delegar al wizard
-  3. Si es callback_query conocido (cat/confirm/skip) → procesar inline
-  4. Si es mensaje de texto → almacenar para el agente nocturno
+Este router no conoce ningún detalle del formato de Telegram — trabaja
+exclusivamente con ParsedUpdate e UserIntent. El parsing pertenece al adapter.
+
+Flujo de despacho (por prioridad):
+  1. WIZARD_CALLBACK       → budget_wizard (si hay PendingAction activo)
+  2. WIZARD_TRIGGER        → arrancar / posponer / ignorar wizard
+  3. CATEGORIZATION_CALLBACK → callback_handler (cat/confirm/skip)
+  4. COMMAND               → chat agent en background
+  5. EXPENSE_REPORT        → almacenar para el agente nocturno (sin acción inmediata)
 """
 
+import asyncio
 import logging
 import os
+from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, Request, Response, HTTPException
 
@@ -18,6 +24,8 @@ from adapters.rails_http import RailsHttpAdapter
 from adapters.telegram_messenger import TelegramMessenger
 from flows import budget_wizard
 from services import callback_handler
+from agents import chat as chat_agent
+from ports.messenger import UserIntent
 
 logger = logging.getLogger(__name__)
 
@@ -43,14 +51,14 @@ async def telegram_webhook(request: Request) -> Response:
 
     chat_id = _get_chat_id(update)
     if not chat_id or chat_id != AUTHORIZED_CHAT_ID:
-        # Responder 200 para que Telegram no reintente
         return Response(status_code=200)
 
-    api = RailsHttpAdapter()
     messenger = TelegramMessenger()
+    api       = RailsHttpAdapter()
 
     try:
-        await _dispatch(api, messenger, update)
+        parsed = messenger.parse_update(update)
+        await _dispatch(api, messenger, parsed)
     except Exception as e:
         logger.error("[webhook] dispatch error: %s", e, exc_info=True)
 
@@ -58,70 +66,85 @@ async def telegram_webhook(request: Request) -> Response:
     return Response(status_code=200)
 
 
-async def _dispatch(api: RailsHttpAdapter, messenger: TelegramMessenger, update: dict) -> None:
-    # ── ¿Hay un flujo conversacional abierto? ────────────────────────────────
-    pending = api.get_active_pending_action()
+async def _dispatch(api: RailsHttpAdapter, messenger: TelegramMessenger, parsed) -> None:
 
-    if update.get("callback_query"):
-        cq = update["callback_query"]
-        cq_id = cq["id"]
-        data = cq.get("data", "")
-
-        if pending and data.startswith("wz"):
-            # Callback del wizard → delegamos
+    # 1. Callback de step del wizard ──────────────────────────────────────────
+    if parsed.intent == UserIntent.WIZARD_CALLBACK:
+        pending = api.get_active_pending_action()
+        if pending:
             budget_wizard.handle_update(
                 api=api,
                 messenger=messenger,
                 pending_action=pending,
                 update_type="callback_query",
-                payload=cq,
-                callback_query_id=cq_id,
-            )
-        elif data.startswith("wizard:") and not pending:
-            # Trigger inicial del wizard (botones del planning scheduler)
-            if data == "wizard:start":
-                # Crear PendingAction y arrancar step 1
-                action = api.create_pending_action(
-                    action_type="budget_planning",
-                    total_steps=8,
-                    context={},
-                )
-                messenger.answer_callback(cq_id, "✅")
-                budget_wizard._go_to_step(api, messenger, action["id"], {}, 1)
-            elif data == "wizard:tomorrow":
-                from datetime import datetime, timezone, timedelta
-                expires_at = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
-                action = api.create_pending_action(
-                    action_type="budget_planning",
-                    total_steps=8,
-                    context={},
-                    expires_at=expires_at,
-                )
-                messenger.answer_callback(cq_id, "👍")
-                messenger.send_message("Entendido 👍 Te mando el wizard mañana.")
-            elif data == "wizard:skip":
-                messenger.answer_callback(cq_id, "Ok")
-                messenger.send_message("Ok, sin presupuesto este período.")
-        else:
-            # Callback normal de categorización / confirmación
-            messenger.answer_callback(cq_id, "✅")
-            callback_handler.handle(api, messenger, data)
-
-    elif update.get("message"):
-        msg = update["message"]
-
-        if pending:
-            # Mensaje durante un flujo activo → delegamos al wizard
-            budget_wizard.handle_update(
-                api=api,
-                messenger=messenger,
-                pending_action=pending,
-                update_type="message",
-                payload=msg,
+                payload=parsed.raw["callback_query"],
+                callback_query_id=parsed.callback_query_id,
             )
         else:
-            # Mensaje normal → se almacena en DB para el agente nocturno
-            # (Rails TelegramController ya lo guarda via su propio webhook
-            #  mientras la migración está en curso; en la versión final
-            #  el Brain tiene su propia tabla de mensajes)
-            logger.info("[webhook] mensaje recibido, sin flujo activo — guardado para agente nocturno")
+            # El wizard ya terminó pero el botón quedó en el chat
+            messenger.answer_callback(parsed.callback_query_id, "⚠️ Este flujo ya cerró.")
+        return
+
+    # 2. Botones de trigger del wizard (start / tomorrow / skip) ─────────────
+    if parsed.intent == UserIntent.WIZARD_TRIGGER:
+        messenger.answer_callback(parsed.callback_query_id, "")
+        _handle_wizard_trigger(api, messenger, parsed.callback_data or "")
+        return
+
+    # 3. Categorización de transacciones (cat / confirm / skip) ───────────────
+    if parsed.intent == UserIntent.CATEGORIZATION_CALLBACK:
+        messenger.answer_callback(parsed.callback_query_id, "✅")
+        callback_handler.handle(api, messenger, parsed.callback_data or "")
+        return
+
+    # 4. Slash command → chat agent en background ──────────────────────────────
+    if parsed.intent == UserIntent.COMMAND:
+        # create_task: el webhook devuelve 200 inmediatamente
+        asyncio.get_event_loop().run_in_executor(
+            None,
+            chat_agent.handle_command,
+            api,
+            messenger,
+            parsed,
+        )
+        return
+
+    # 5. Texto plano → guardado para el agente nocturno ───────────────────────
+    logger.info(
+        "[webhook] expense_report recibido — guardado para agente nocturno: %.60r",
+        parsed.text,
+    )
+
+
+def _handle_wizard_trigger(api: RailsHttpAdapter, messenger: TelegramMessenger, data: str) -> None:
+    """
+    Maneja los botones del mensaje de trigger quincenal:
+      wizard:start    → crear PendingAction e ir al step 1
+      wizard:tomorrow → crear PendingAction con expires_at=+24h
+      wizard:skip     → no hacer nada
+    """
+    if data == "wizard:start":
+        action = api.create_pending_action(
+            action_type="budget_planning",
+            total_steps=8,
+            context={},
+        )
+        budget_wizard._go_to_step(api, messenger, action["id"], {}, 1)
+
+    elif data == "wizard:tomorrow":
+        expires_at = (
+            datetime.now(timezone.utc) + timedelta(hours=24)
+        ).isoformat()
+        api.create_pending_action(
+            action_type="budget_planning",
+            total_steps=8,
+            context={},
+            expires_at=expires_at,
+        )
+        messenger.send_message("Entendido 👍 Te mando el wizard mañana.")
+
+    elif data == "wizard:skip":
+        messenger.send_message("Ok, sin presupuesto este período. Cualquier cosa me avisás.")
+
+    else:
+        logger.warning("[webhook] wizard trigger desconocido: %s", data)

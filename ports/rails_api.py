@@ -80,3 +80,13 @@ class RailsApiPort(ABC):
     def get_categories(self) -> list[dict]:
         """GET /api/v1/categories"""
         ...
+
+    @abstractmethod
+    def get_income_sources(self) -> list[dict]:
+        """GET /api/v1/income_sources"""
+        ...
+
+    @abstractmethod
+    def get_recurring_obligations(self) -> list[dict]:
+        """GET /api/v1/recurring_obligations"""
+        ...

@@ -134,3 +134,15 @@ class RailsHttpAdapter(RailsApiPort):
     def get_categories(self) -> list[dict]:
         data = self._get("/api/v1/categories")
         return data if isinstance(data, list) else data.get("data", [])
+
+    # --- income sources ---
+
+    def get_income_sources(self) -> list[dict]:
+        data = self._get("/api/v1/income_sources")
+        return data if isinstance(data, list) else data.get("data", [])
+
+    # --- recurring obligations ---
+
+    def get_recurring_obligations(self) -> list[dict]:
+        data = self._get("/api/v1/recurring_obligations")
+        return data if isinstance(data, list) else data.get("data", [])
