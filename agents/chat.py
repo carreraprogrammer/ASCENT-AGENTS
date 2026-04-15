@@ -114,14 +114,28 @@ def _run_conversation(
     initial_message: str,
 ) -> None:
     now_col = datetime.now(COLOMBIA_TZ)
-    run_agent(
+    state = {"responded": False, "mutated": False}
+    final_text = run_agent(
         system_prompt=SYSTEM_PROMPT,
         tools=_build_tools(),
-        tool_map=_build_tool_map(api, messenger, now_col),
+        tool_map=_build_tool_map(api, messenger, now_col, state),
         initial_message=initial_message,
         max_iterations=12,
         model=CHAT_MODEL,
     )
+
+    if state["responded"]:
+        return
+
+    if final_text:
+        messenger.send_message(final_text)
+        return
+
+    if state["mutated"]:
+        messenger.send_message("✅ Listo.")
+        return
+
+    messenger.send_message("⚠️ No pude cerrar bien la respuesta. Intentá de nuevo.")
 
 
 def handle_command(api: RailsApiPort, messenger: MessengerPort, parsed: ParsedUpdate) -> None:
@@ -147,12 +161,31 @@ def handle_message(api: RailsApiPort, messenger: MessengerPort, parsed: ParsedUp
     if not text:
         return
 
+    message_payload = parsed.raw.get("message", {})
+    telegram_ts = message_payload.get("date")
+    if telegram_ts:
+        ts_col = datetime.fromtimestamp(telegram_ts, tz=timezone.utc).astimezone(COLOMBIA_TZ)
+        telegram_context = (
+            f"Fecha real del mensaje en Telegram: {ts_col.strftime('%Y-%m-%d')}\n"
+            f"Hora real del mensaje en Colombia: {ts_col.strftime('%H:%M')}\n"
+            "Usa esa fecha por defecto si el usuario no especifica otra. "
+            "No inventes fechas ni años distintos."
+        )
+    else:
+        ts_col = datetime.now(COLOMBIA_TZ)
+        telegram_context = (
+            f"Fecha actual en Colombia: {ts_col.strftime('%Y-%m-%d')}\n"
+            f"Hora actual en Colombia: {ts_col.strftime('%H:%M')}\n"
+            "Si el usuario no especifica fecha, usa la fecha de hoy en Colombia."
+        )
+
     initial_message = (
         "Mensaje nuevo de Daniel en Telegram. "
         "Interpretalo y actuá en tiempo real usando las herramientas disponibles. "
         "Si es un gasto o ingreso claro, registralo. "
         "Si es una corrección o borrado, buscá la transacción correcta y actualizala. "
         "Si hay ambigüedad real, pedí una aclaración breve.\n\n"
+        f"{telegram_context}\n\n"
         f"Mensaje: {text}"
     )
 
@@ -351,9 +384,10 @@ def _build_tools() -> list[dict]:
 
 # ── Tool map ──────────────────────────────────────────────────────────────────
 
-def _build_tool_map(api: RailsApiPort, messenger: MessengerPort, now: datetime) -> dict:
+def _build_tool_map(api: RailsApiPort, messenger: MessengerPort, now: datetime, state: dict | None = None) -> dict:
     month, year = now.month, now.year
     today = now.date()
+    state = state or {"responded": False, "mutated": False}
 
     def _patch(path: str, body: dict) -> dict:
         r = httpx.patch(
@@ -362,6 +396,7 @@ def _build_tool_map(api: RailsApiPort, messenger: MessengerPort, now: datetime) 
             json=body, timeout=15,
         )
         r.raise_for_status()
+        state["mutated"] = True
         return r.json().get("data", {})
 
     def _delete(path: str) -> dict:
@@ -371,6 +406,7 @@ def _build_tool_map(api: RailsApiPort, messenger: MessengerPort, now: datetime) 
             timeout=15,
         )
         r.raise_for_status()
+        state["mutated"] = True
         return {"ok": True}
 
     def _post(path: str, body: dict) -> dict:
@@ -380,6 +416,7 @@ def _build_tool_map(api: RailsApiPort, messenger: MessengerPort, now: datetime) 
             json=body, timeout=15,
         )
         r.raise_for_status()
+        state["mutated"] = True
         return r.json().get("data", {})
 
     def _normalize_categories() -> list[dict]:
@@ -465,5 +502,5 @@ def _build_tool_map(api: RailsApiPort, messenger: MessengerPort, now: datetime) 
         "update_recurring_obligation": lambda p: _patch(f"/api/v1/recurring_obligations/{p.pop('id')}", p),
         "delete_recurring_obligation": lambda p: _delete(f"/api/v1/recurring_obligations/{p['id']}"),
 
-        "send_telegram": lambda p: messenger.send_message(p["message"]) or {},
+        "send_telegram": lambda p: state.update({"responded": True}) or messenger.send_message(p["message"]) or {},
     }
