@@ -10,7 +10,7 @@ Flujo de despacho (por prioridad):
   2. WIZARD_TRIGGER        → arrancar / posponer / ignorar wizard
   3. CATEGORIZATION_CALLBACK → callback_handler (cat/confirm/skip)
   4. COMMAND               → chat agent en background
-  5. EXPENSE_REPORT        → almacenar para el agente nocturno (sin acción inmediata)
+  5. EXPENSE_REPORT        → agente conversacional en tiempo real
 """
 
 import asyncio
@@ -22,7 +22,7 @@ from fastapi import APIRouter, Request, Response, HTTPException
 
 from adapters.rails_http import RailsHttpAdapter
 from adapters.telegram_messenger import TelegramMessenger
-from flows import budget_wizard
+from flows import budget_wizard, financial_context_wizard
 from services import callback_handler
 from agents import chat as chat_agent
 from ports.messenger import UserIntent
@@ -68,7 +68,24 @@ async def telegram_webhook(request: Request) -> Response:
 
 async def _dispatch(api: RailsHttpAdapter, messenger: TelegramMessenger, parsed) -> None:
 
-    # 1. Callback de step del wizard ──────────────────────────────────────────
+    # 1a. Callback del financial context wizard ───────────────────────────────
+    if parsed.intent == UserIntent.FC_WIZARD_CALLBACK:
+        pending = api.get_active_pending_action()
+        if pending and pending.get("action_type") == "financial_context_setup":
+            messenger.answer_callback(parsed.callback_query_id, "")
+            financial_context_wizard.handle_update(
+                api=api,
+                messenger=messenger,
+                pending_action=pending,
+                update_type="callback_query",
+                payload=parsed.raw.get("callback_query", {}),
+                callback_query_id=parsed.callback_query_id,
+            )
+        else:
+            messenger.answer_callback(parsed.callback_query_id, "⚠️ Este flujo ya cerró.")
+        return
+
+    # 1b. Callback de step del budget wizard ──────────────────────────────────
     if parsed.intent == UserIntent.WIZARD_CALLBACK:
         pending = api.get_active_pending_action()
         if pending:
@@ -109,10 +126,14 @@ async def _dispatch(api: RailsHttpAdapter, messenger: TelegramMessenger, parsed)
         )
         return
 
-    # 5. Texto plano → guardado para el agente nocturno ───────────────────────
-    logger.info(
-        "[webhook] expense_report recibido — guardado para agente nocturno: %.60r",
-        parsed.text,
+    # 5. Texto plano → agente conversacional en tiempo real ───────────────────
+    logger.info("[webhook] realtime message recibido: %.60r", parsed.text)
+    asyncio.get_event_loop().run_in_executor(
+        None,
+        chat_agent.handle_message,
+        api,
+        messenger,
+        parsed,
     )
 
 

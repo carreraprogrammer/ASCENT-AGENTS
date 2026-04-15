@@ -98,7 +98,7 @@ recibe update de Telegram
       → delegar a callback_handler
   → ¿hay PendingAction activo para este usuario?
       sí → delegar a budget_wizard con el mensaje
-      no → flujo normal (el agente nocturno ya maneja esto)
+      no → flujo conversacional en tiempo real
 ```
 
 El webhook responde a Telegram en < 2 segundos (answerCallbackQuery inmediato, procesamiento en background).
@@ -110,7 +110,7 @@ El webhook responde a Telegram en < 2 segundos (answerCallbackQuery inmediato, p
 Equivalente al `revision_nocturna.py` original pero usando ports. Cada noche:
 
 1. `get_summary` → estado financiero del mes (balance, burn_rate, deudas)
-2. `get_telegram_messages` → gastos reportados por el usuario en las últimas 24h
+2. `get_telegram_messages` → respaldo/conciliación de mensajes del día
 3. `get_gmail_emails` → correos bancarios (Davivienda, Nequi) vía IMAP directo
 4. `get_transactions` + `get_pending_transactions` → historial y pendientes de aclaración
 5. `create_transaction` → registra cada gasto nuevo detectado
@@ -152,6 +152,7 @@ El estado persiste entre mensajes en `PendingAction.context` (jsonb en Postgres)
 | `DANIEL15K_SERVICE_TOKEN` | Token del `service_account` del Brain |
 | `DANIEL15K_ACCOUNT_ID` | Cuenta objetivo sobre la que actúa el Brain |
 | `DANIEL15K_AGENT_TYPE` | Tipo de agente. Default: `finance_coach` |
+| `CLAUDE_CHAT_MODEL` | Modelo opcional para el chat en tiempo real. Si no existe, usa `CLAUDE_MODEL` |
 | `TELEGRAM_BOT_TOKEN` | Token del bot |
 | `TELEGRAM_CHAT_ID` | ID del chat personal de Daniel |
 | `ANTHROPIC_API_KEY` | API key de Anthropic |

@@ -24,6 +24,7 @@ def run_agent(
     tool_map: dict[str, Callable],
     initial_message: str,
     max_iterations: int = 20,
+    model: str | None = None,
 ) -> str:
     """
     Corre un tool-calling loop con Claude.
@@ -34,6 +35,7 @@ def run_agent(
         tool_map: diccionario nombre_herramienta → función Python
         initial_message: primer mensaje del usuario
         max_iterations: límite de seguridad para evitar loops infinitos
+        model: modelo opcional; si no se envía usa MODEL
 
     Returns:
         El último texto generado por Claude (sin tool calls)
@@ -43,7 +45,7 @@ def run_agent(
 
     for i in range(max_iterations):
         response = client.messages.create(
-            model=MODEL,
+            model=model or MODEL,
             max_tokens=MAX_TOKENS,
             system=system_prompt,
             tools=tools,
