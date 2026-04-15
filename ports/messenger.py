@@ -16,6 +16,7 @@ class UserIntent:
     FC_WIZARD_CALLBACK       = "fc_wizard_callback"       # botón del financial context wizard
     WIZARD_TRIGGER           = "wizard_trigger"           # botones de inicio del wizard (start/tomorrow/skip)
     CATEGORIZATION_CALLBACK  = "categorization_callback"  # cat: / confirm: / skip:
+    CHAT_CALLBACK            = "chat_callback"            # chat:... respuestas rápidas del chat
     COMMAND                  = "command"                  # /resumen /deudas /balance ...
     EXPENSE_REPORT           = "expense_report"           # texto plano — va al agente nocturno
 

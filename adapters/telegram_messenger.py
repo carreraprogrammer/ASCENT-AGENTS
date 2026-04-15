@@ -52,6 +52,14 @@ class TelegramMessenger(MessengerPort):
         data    = cq.get("data", "")
         cq_id   = cq.get("id", "")
 
+        if data.startswith("wz_fc:"):
+            return ParsedUpdate(
+                intent=UserIntent.FC_WIZARD_CALLBACK,
+                callback_query_id=cq_id,
+                callback_data=data,
+                raw=raw,
+            )
+
         if data.startswith("wz:") or data.startswith("wz_"):
             return ParsedUpdate(
                 intent=UserIntent.WIZARD_CALLBACK,
@@ -65,6 +73,15 @@ class TelegramMessenger(MessengerPort):
                 intent=UserIntent.WIZARD_TRIGGER,
                 callback_query_id=cq_id,
                 callback_data=data,          # "wizard:start" | "wizard:tomorrow" | "wizard:skip"
+                raw=raw,
+            )
+
+        if data.startswith("chat:"):
+            return ParsedUpdate(
+                intent=UserIntent.CHAT_CALLBACK,
+                callback_query_id=cq_id,
+                callback_data=data,
+                text=data.removeprefix("chat:"),
                 raw=raw,
             )
 

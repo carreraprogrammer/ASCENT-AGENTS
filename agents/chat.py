@@ -7,6 +7,7 @@ conversación está siempre disponible.
 """
 
 import logging
+import re
 import httpx
 from datetime import datetime, timezone, timedelta, date
 
@@ -33,10 +34,15 @@ configuración.
 
 Reglas:
 - Usá los datos reales de la API. Nada inventado.
-- Sé conciso: Telegram, no PDF. Máximo 3-4 párrafos o una lista corta.
+- Sé conciso: Telegram, no PDF. Idealmente 1-2 frases. Nunca más de 4 líneas.
 - Cuando hables de plata, siempre en pesos colombianos formateados ($1.500.000).
 - No repitas números crudos — interpretálos.
 - Podés usar emojis con moderación (📊 ✅ ⚠️ 💰).
+- No muestres tu proceso. No digas "voy a", "entendí", "necesito hacer", "paso 1".
+- No expliques herramientas, ni enumeres lo que pensás hacer antes de actuar.
+- Si necesitás aclarar algo, preguntá solo UNA cosa por vez.
+- Si la aclaración cabe en 2-3 opciones, preferí `send_telegram` con `inline_keyboard`.
+- Para Telegram usá texto plano o HTML simple (<b>, <i>). No uses markdown tipo **texto**.
 - Al final usá `send_telegram` para enviar la respuesta. Solo una vez.
 - Si el usuario manda un gasto o ingreso claro, registralo en tiempo real.
   Si queda claro, respondé algo corto como "✅ Registrado".
@@ -112,6 +118,15 @@ def _flatten_transaction(t: dict) -> dict:
     }
 
 
+def _normalize_telegram_html(text: str) -> str:
+    if not text:
+        return text
+
+    normalized = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
+    normalized = re.sub(r"__(.+?)__", r"<i>\1</i>", normalized)
+    return normalized
+
+
 def _run_conversation(
     api: RailsApiPort,
     messenger: MessengerPort,
@@ -132,7 +147,7 @@ def _run_conversation(
         return
 
     if final_text:
-        messenger.send_message(final_text)
+        messenger.send_message(_normalize_telegram_html(final_text))
         return
 
     if state["mutated"]:
@@ -384,10 +399,29 @@ def _build_tools() -> list[dict]:
         # ── Envío ─────────────────────────────────────────────────────────────
         {
             "name": "send_telegram",
-            "description": "Envía la respuesta final. Llamar una sola vez al final.",
+            "description": (
+                "Envía la respuesta final. Soporta inline_keyboard para botones interactivos. "
+                "Usa HTML simple de Telegram. "
+                "Para respuestas rápidas del chat usa callback_data con formato 'chat:respuesta breve'."
+            ),
             "input_schema": {"type": "object", "properties": {
                 "message": {"type": "string", "description": "HTML de Telegram."},
-            }, "required": ["message"]},
+                "mensaje": {"type": "string", "description": "HTML de Telegram."},
+                "inline_keyboard": {
+                    "type": "array",
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "text": {"type": "string"},
+                                "callback_data": {"type": "string"},
+                            },
+                            "required": ["text", "callback_data"],
+                        },
+                    },
+                },
+            }, "required": []},
         },
     ]
 
@@ -512,5 +546,17 @@ def _build_tool_map(api: RailsApiPort, messenger: MessengerPort, now: datetime, 
         "update_recurring_obligation": lambda p: _patch(f"/api/v1/recurring_obligations/{p.pop('id')}", p),
         "delete_recurring_obligation": lambda p: _delete(f"/api/v1/recurring_obligations/{p['id']}"),
 
-        "send_telegram": lambda p: state.update({"responded": True}) or messenger.send_message(p["message"]) or {},
+        "send_telegram": lambda p: state.update({"responded": True}) or _send_telegram(messenger, p) or {},
     }
+
+
+def _send_telegram(messenger: MessengerPort, payload: dict) -> dict:
+    message = payload.get("message") or payload.get("mensaje") or ""
+    normalized_message = _normalize_telegram_html(message)
+
+    if payload.get("inline_keyboard"):
+        messenger.send_with_buttons(normalized_message, payload["inline_keyboard"])
+    else:
+        messenger.send_message(normalized_message)
+
+    return {"ok": True}

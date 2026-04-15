@@ -114,6 +114,18 @@ async def _dispatch(api: RailsHttpAdapter, messenger: TelegramMessenger, parsed)
         callback_handler.handle(api, messenger, parsed.callback_data or "")
         return
 
+    # 3b. Respuesta rápida del chat con botones inline ───────────────────────
+    if parsed.intent == UserIntent.CHAT_CALLBACK:
+        messenger.answer_callback(parsed.callback_query_id, "")
+        asyncio.get_event_loop().run_in_executor(
+            None,
+            chat_agent.handle_message,
+            api,
+            messenger,
+            parsed,
+        )
+        return
+
     # 4. Slash command → chat agent en background ──────────────────────────────
     if parsed.intent == UserIntent.COMMAND:
         # create_task: el webhook devuelve 200 inmediatamente
