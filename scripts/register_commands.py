@@ -16,7 +16,6 @@ COMMANDS = [
     {"command": "presupuesto", "description": "Cómo vas categoría por categoría"},
     {"command": "deudas",      "description": "Estado de tus deudas y estrategia de pago"},
     {"command": "balance",     "description": "Saldo disponible ahora mismo"},
-    {"command": "chat",        "description": "Cualquier pregunta libre sobre tus finanzas"},
 ]
 
 resp = httpx.post(f"{TG_BASE}/setMyCommands", json={"commands": COMMANDS})
