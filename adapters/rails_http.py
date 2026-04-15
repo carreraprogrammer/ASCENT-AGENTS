@@ -14,14 +14,29 @@ logger = logging.getLogger(__name__)
 
 BASE_URL = os.environ.get("DANIEL15K_API_URL", "https://daniel15k-api-production.up.railway.app")
 API_TOKEN = os.environ.get("DANIEL15K_API_TOKEN", "")
+SERVICE_TOKEN = os.environ.get("DANIEL15K_SERVICE_TOKEN", "")
+ACCOUNT_ID = os.environ.get("DANIEL15K_ACCOUNT_ID", "")
+AGENT_TYPE = os.environ.get("DANIEL15K_AGENT_TYPE", "finance_coach")
 TIMEOUT = 15
 
 
-def _headers() -> dict:
+def build_auth_headers() -> dict:
+    if SERVICE_TOKEN and ACCOUNT_ID:
+        return {
+            "Authorization": f"Bearer {SERVICE_TOKEN}",
+            "X-Account-Id": str(ACCOUNT_ID),
+            "X-Agent-Type": AGENT_TYPE,
+            "Content-Type": "application/json",
+        }
+
     return {
         "Authorization": f"Bearer {API_TOKEN}",
         "Content-Type": "application/json",
     }
+
+
+def _headers() -> dict:
+    return build_auth_headers()
 
 
 class RailsHttpAdapter(RailsApiPort):

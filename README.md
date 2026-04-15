@@ -16,7 +16,7 @@ FastAPI — daniel15k-agents  (este repo)
     ├── /agents/nightly      ← trigger manual de revisión nocturna
     ├── /agents/planning     ← trigger manual de planificación quincenal
     └── scheduler            ← APScheduler: cron interno
-    ↕  REST + JWT long-lived
+    ↕  REST + account delegation
 Rails API — daniel15k-api   (data layer)
 ```
 
@@ -147,8 +147,11 @@ El estado persiste entre mensajes en `PendingAction.context` (jsonb en Postgres)
 
 | Variable | Descripción |
 |----------|-------------|
-| `RAILS_API_URL` | URL de la API Rails en Railway |
-| `RAILS_API_TOKEN` | JWT long-lived (10 años) para autenticar el Brain contra Rails |
+| `DANIEL15K_API_URL` | URL de la API Rails en Railway |
+| `DANIEL15K_API_TOKEN` | JWT legacy de compatibilidad |
+| `DANIEL15K_SERVICE_TOKEN` | Token del `service_account` del Brain |
+| `DANIEL15K_ACCOUNT_ID` | Cuenta objetivo sobre la que actúa el Brain |
+| `DANIEL15K_AGENT_TYPE` | Tipo de agente. Default: `finance_coach` |
 | `TELEGRAM_BOT_TOKEN` | Token del bot |
 | `TELEGRAM_CHAT_ID` | ID del chat personal de Daniel |
 | `ANTHROPIC_API_KEY` | API key de Anthropic |
@@ -201,8 +204,8 @@ No hardcodear el puerto. Usar `${PORT:-8000}` en el Dockerfile CMD. Railway inye
 **Tool calls requieren positional arg, no keyword expansion**
 `tool_map[name](**tool_input)` falla si `tool_input` es `{}` (no hay parámetro self implícito). Usar `tool_map[name](tool_input)` pasando el dict como argumento posicional.
 
-**JWT long-lived para el Brain**
-El Brain necesita autenticarse contra Rails sin flujo OAuth. Se genera un JWT de 10 años usando el `JWT_SECRET` de Railway y el `user_id` real del usuario. El payload debe incluir todos los campos que `JwtService` valida: `email`, `super_admin`, `permissions`, `jti`, `type: "access"`.
+**Delegación por account**
+El Brain ahora puede autenticarse como `service_account` usando `DANIEL15K_SERVICE_TOKEN` + `DANIEL15K_ACCOUNT_ID` + `DANIEL15K_AGENT_TYPE`. Si esas variables no existen, hace fallback al `DANIEL15K_API_TOKEN` legacy para no romper operación.
 
 **answerCallbackQuery tiene ventana de ~10 segundos**
 Si el Brain no responde al callback de Telegram en ese tiempo, el botón queda girando. La solución: responder inmediatamente con `answerCallbackQuery` y procesar en background.

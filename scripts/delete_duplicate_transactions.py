@@ -12,11 +12,11 @@ import sys
 import httpx
 from collections import defaultdict
 
-API_URL   = os.environ.get("DANIEL15K_API_URL", "https://daniel15k-api-production.up.railway.app")
-API_TOKEN = os.environ.get("DANIEL15K_API_TOKEN", "")
+from adapters.rails_http import BASE_URL as API_URL, build_auth_headers
+
 DRY_RUN   = "--dry-run" in sys.argv
 
-headers = {"Authorization": f"Bearer {API_TOKEN}"}
+headers = build_auth_headers()
 
 def get_transactions(month: int, year: int) -> list[dict]:
     r = httpx.get(f"{API_URL}/api/v1/transactions", params={"month": month, "year": year},

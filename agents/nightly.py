@@ -20,6 +20,7 @@ from datetime import datetime, timezone, timedelta, date
 from ports.rails_api import RailsApiPort
 from ports.messenger import MessengerPort
 from services.claude_client import run_agent
+from adapters.rails_http import BASE_URL as API_BASE_URL, build_auth_headers
 
 COLOMBIA_TZ = timezone(timedelta(hours=-5))
 MESES = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"]
@@ -118,8 +119,8 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort) -> dict:
             # Leer updates pendientes del endpoint de Rails
             adapter = api  # ya es RailsHttpAdapter u otro
             r = httpx.get(
-                f"{os.environ.get('DANIEL15K_API_URL', 'https://daniel15k-api-production.up.railway.app')}/api/v1/telegram/updates",
-                headers={"Authorization": f"Bearer {os.environ.get('DANIEL15K_API_TOKEN', '')}"},
+                f"{API_BASE_URL}/api/v1/telegram/updates",
+                headers=build_auth_headers(),
                 timeout=15,
             )
             r.raise_for_status()
@@ -217,8 +218,8 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort) -> dict:
         try:
             import httpx
             r = httpx.post(
-                f"{os.environ.get('DANIEL15K_API_URL', '')}/api/v1/transactions",
-                headers={"Authorization": f"Bearer {os.environ.get('DANIEL15K_API_TOKEN', '')}"},
+                f"{API_BASE_URL}/api/v1/transactions",
+                headers=build_auth_headers(),
                 json=inp, timeout=15,
             )
             if r.status_code == 201:
@@ -490,6 +491,11 @@ Si get_summary devuelve burn_rate.categories con alertas:
 Si es día 1-5 o 15-20 del mes, menciona al final del resumen:
 - Si hay budgets configurados: "✅ Plan del mes aprobado"
 - Si NO hay budgets: "📋 Falta aprobar el plan del mes — el wizard te lo envía esta mañana"
+
+═══ CONTEXTO FINANCIERO ═══
+Si get_summary o get_financial_context devuelve phase=null o data=null:
+- Mencionalo al final del resumen: "⚙️ Falta configurar tu contexto financiero — escribí /chat configurar contexto financiero y te guío en 3 pasos."
+- No hagas el resumen incompleto por esto, usá los datos disponibles.
 
 ═══ PROCESAMIENTO DE CALLBACKS ═══
 Si get_telegram_messages devuelve resolved_callbacks:
