@@ -14,7 +14,7 @@ import anthropic
 logger = logging.getLogger(__name__)
 
 ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-6")
+MODEL = "claude-sonnet-4-6"
 MAX_TOKENS = 8096
 
 

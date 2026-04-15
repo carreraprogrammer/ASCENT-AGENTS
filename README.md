@@ -152,7 +152,6 @@ El estado persiste entre mensajes en `PendingAction.context` (jsonb en Postgres)
 | `DANIEL15K_SERVICE_TOKEN` | Token del `service_account` del Brain |
 | `DANIEL15K_ACCOUNT_ID` | Cuenta objetivo sobre la que actúa el Brain |
 | `DANIEL15K_AGENT_TYPE` | Tipo de agente. Default: `finance_coach` |
-| `CLAUDE_CHAT_MODEL` | Modelo opcional para el chat en tiempo real. Si no existe, usa `CLAUDE_MODEL` |
 | `TELEGRAM_BOT_TOKEN` | Token del bot |
 | `TELEGRAM_CHAT_ID` | ID del chat personal de Daniel |
 | `ANTHROPIC_API_KEY` | API key de Anthropic |

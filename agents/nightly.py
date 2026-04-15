@@ -27,6 +27,7 @@ MESES = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "
 
 GMAIL_ADDR = os.environ.get("GMAIL_ADDRESS", "")
 GMAIL_PASS = os.environ.get("GMAIL_APP_PASSWORD", "")
+NIGHTLY_MODEL = "claude-sonnet-4-6"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -542,6 +543,7 @@ def run_nightly(api: RailsApiPort, messenger: MessengerPort) -> None:
         tool_map=tool_map,
         initial_message=f"Ejecuta la revisión nocturna para hoy {fecha}.",
         max_iterations=25,
+        model=NIGHTLY_MODEL,
     )
 
     print("\n✅ Revisión nocturna completada.")
