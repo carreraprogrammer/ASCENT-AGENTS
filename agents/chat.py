@@ -48,6 +48,10 @@ Reglas:
 - Si no tenés suficiente contexto de categoría o subcategoría, registrá igual
   y pedí la aclaración más corta posible.
 - Si el usuario pide configurar el contexto financiero, usá `trigger_financial_context_wizard`.
+- Contrato de fecha de la API para transacciones:
+  - usa `DD/MM/YYYY` si conocés el año
+  - usa `DD/MM` si estás usando la fecha actual del mensaje
+  - no uses formato ISO `YYYY-MM-DD`
 """
 
 _COMMAND_PROMPTS = {
@@ -166,17 +170,19 @@ def handle_message(api: RailsApiPort, messenger: MessengerPort, parsed: ParsedUp
     if telegram_ts:
         ts_col = datetime.fromtimestamp(telegram_ts, tz=timezone.utc).astimezone(COLOMBIA_TZ)
         telegram_context = (
-            f"Fecha real del mensaje en Telegram: {ts_col.strftime('%Y-%m-%d')}\n"
+            f"Fecha real del mensaje en Telegram: {ts_col.strftime('%d/%m/%Y')}\n"
             f"Hora real del mensaje en Colombia: {ts_col.strftime('%H:%M')}\n"
             "Usa esa fecha por defecto si el usuario no especifica otra. "
-            "No inventes fechas ni años distintos."
+            "No inventes fechas ni años distintos. "
+            "Si vas a crear una transacción con esa fecha, envíala como DD/MM/YYYY."
         )
     else:
         ts_col = datetime.now(COLOMBIA_TZ)
         telegram_context = (
-            f"Fecha actual en Colombia: {ts_col.strftime('%Y-%m-%d')}\n"
+            f"Fecha actual en Colombia: {ts_col.strftime('%d/%m/%Y')}\n"
             f"Hora actual en Colombia: {ts_col.strftime('%H:%M')}\n"
-            "Si el usuario no especifica fecha, usa la fecha de hoy en Colombia."
+            "Si el usuario no especifica fecha, usa la fecha de hoy en Colombia. "
+            "Si vas a crear una transacción con esa fecha, envíala como DD/MM/YYYY."
         )
 
     initial_message = (
@@ -263,9 +269,13 @@ def _build_tools() -> list[dict]:
         # ── Escritura: transacciones ─────────────────────────────────────────
         {
             "name": "create_transaction",
-            "description": "Crea un gasto o ingreso. Usá source=telegram para mensajes que llegan por Telegram.",
+            "description": (
+                "Crea un gasto o ingreso. Usá source=telegram para mensajes que llegan por Telegram. "
+                "La API espera `date` en formato `DD/MM/YYYY` o `DD/MM`. "
+                "No uses `YYYY-MM-DD`."
+            ),
             "input_schema": {"type": "object", "properties": {
-                "date": {"type": "string", "description": "YYYY-MM-DD"},
+                "date": {"type": "string", "description": "DD/MM/YYYY o DD/MM"},
                 "concept": {"type": "string"},
                 "product": {"type": "string"},
                 "amount": {"type": "integer"},
@@ -284,7 +294,7 @@ def _build_tools() -> list[dict]:
             "description": "Corrige una transacción existente por ID.",
             "input_schema": {"type": "object", "properties": {
                 "id": {"type": "string"},
-                "date": {"type": "string", "description": "YYYY-MM-DD"},
+                "date": {"type": "string", "description": "DD/MM/YYYY o DD/MM"},
                 "concept": {"type": "string"},
                 "product": {"type": "string"},
                 "amount": {"type": "integer"},
