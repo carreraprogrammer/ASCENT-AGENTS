@@ -12,17 +12,18 @@ from dataclasses import dataclass, field
 
 class UserIntent:
     """Intents de dominio — sin ningún detalle de Telegram."""
-    WIZARD_CALLBACK          = "wizard_callback"          # botón de step activo del wizard
+    WIZARD_CALLBACK          = "wizard_callback"          # botón de step del budget wizard
+    FC_WIZARD_CALLBACK       = "fc_wizard_callback"       # botón del financial context wizard
     WIZARD_TRIGGER           = "wizard_trigger"           # botones de inicio del wizard (start/tomorrow/skip)
     CATEGORIZATION_CALLBACK  = "categorization_callback"  # cat: / confirm: / skip:
-    COMMAND                  = "command"                  # /resumen /deudas /chat ...
+    COMMAND                  = "command"                  # /resumen /deudas /balance ...
     EXPENSE_REPORT           = "expense_report"           # texto plano — va al agente nocturno
 
 
 @dataclass
 class ParsedUpdate:
     intent: str
-    command: str | None       = None   # "resumen", "deudas", "chat" ...
+    command: str | None       = None   # "resumen", "deudas", "balance" ...
     command_args: str | None  = None   # texto después del comando, o None
     text: str                 = ""     # texto original completo
     callback_query_id: str | None = None

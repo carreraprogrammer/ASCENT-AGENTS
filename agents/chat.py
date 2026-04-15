@@ -126,19 +126,14 @@ def _run_conversation(
 
 def handle_command(api: RailsApiPort, messenger: MessengerPort, parsed: ParsedUpdate) -> None:
     command = parsed.command or ""
-    args    = parsed.command_args
 
-    if command == "chat" and not args:
-        messenger.send_message(_HELP_TEXT)
-        return
-
-    if command not in _COMMAND_PROMPTS and command != "chat":
+    if command not in _COMMAND_PROMPTS:
         messenger.send_message(
             f"❓ No conozco el comando <code>/{command}</code>.\n\n{_HELP_TEXT}"
         )
         return
 
-    initial_message = args if command == "chat" else _COMMAND_PROMPTS[command]
+    initial_message = _COMMAND_PROMPTS[command]
 
     try:
         _run_conversation(api, messenger, initial_message)

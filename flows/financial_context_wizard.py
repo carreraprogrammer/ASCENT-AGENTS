@@ -3,7 +3,7 @@ flows/financial_context_wizard.py — Wizard de configuración del contexto fina
 
 Se activa cuando:
   a) El agente nocturno detecta que financial_context es null
-  b) El usuario pide /chat configurar contexto financiero
+  b) El usuario escribe que quiere configurar su contexto financiero
 
 Flujo (3 steps):
   1. Fase financiera — explica cada opción, recomienda basado en deudas/ingresos
@@ -104,7 +104,7 @@ def handle_update(
             f"Estrategia: {strategy_label}\n"
             f"Reward: {ctx['reward_pct']}% del sobrante para vos\n\n"
             f"El agente nocturno ya tiene esto en cuenta. Podés cambiarlo cuando quieras con "
-            f"<code>/chat configurar contexto financiero</code>."
+            f"un mensaje como <code>configurar contexto financiero</code>."
         )
 
 
