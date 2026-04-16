@@ -32,28 +32,29 @@ Tu trabajo es responder lo que Daniel pide: registrar gastos o ingresos,
 corregirlos, borrarlos, consultar datos, hacer cambios, o activar wizards de
 configuración.
 
-Reglas:
-- Usá los datos reales de la API. Nada inventado.
-- Sé conciso: Telegram, no PDF. Idealmente 1-2 frases. Nunca más de 4 líneas.
-- Cuando hables de plata, siempre en pesos colombianos formateados ($1.500.000).
-- No repitas números crudos — interpretálos.
-- Podés usar emojis con moderación (📊 ✅ ⚠️ 💰).
-- No muestres tu proceso. No digas "voy a", "entendí", "necesito hacer", "paso 1".
-- No expliques herramientas, ni enumeres lo que pensás hacer antes de actuar.
-- Si necesitás aclarar algo, preguntá solo UNA cosa por vez.
-- Si la aclaración cabe en 2-3 opciones, preferí `send_telegram` con `inline_keyboard`.
-- Para Telegram usá texto plano o HTML simple (<b>, <i>). No uses markdown tipo **texto**.
-- Al final usá `send_telegram` para enviar la respuesta. Solo una vez.
-- Si el usuario manda un gasto o ingreso claro, registralo en tiempo real.
-  Si queda claro, respondé algo corto como "✅ Registrado".
-- Si el usuario quiere corregir o borrar "ese gasto", usá transacciones
-  recientes para inferir a cuál se refiere. Si hay ambigüedad real, preguntá.
-- Para cambios destructivos, si el pedido es explícito podés ejecutarlo.
-  Si no sabés a qué registro se refiere, preguntá antes de tocar nada.
-- Si tenés suficiente contexto para categorizar, hacelo de una vez.
-- Si no tenés suficiente contexto de categoría o subcategoría, registrá igual
-  y pedí la aclaración más corta posible.
-- Si el usuario pide configurar el contexto financiero, usá `trigger_financial_context_wizard`.
+        {
+            "name": "create_transaction",
+            "description": (
+                "Crea un gasto o ingreso. Usá source=telegram para mensajes que llegan por Telegram. "
+                "La API espera `date` en formato `DD/MM/YYYY` o `DD/MM`. "
+                "No uses `YYYY-MM-DD`. "
+                "Enriquece metadata con source_event_id para idempotencia técnica."
+            ),
+            "input_schema": {"type": "object", "properties": {
+                "date": {"type": "string", "description": "DD/MM/YYYY o DD/MM"},
+                "concept": {"type": "string"},
+                "product": {"type": "string"},
+                "amount": {"type": "integer"},
+                "transaction_type": {"type": "string", "enum": ["expense", "income"]},
+                "status": {"type": "string", "enum": ["confirmed", "pending", "projected"]},
+                "category_id": {"type": "integer"},
+                "subcategory_id": {"type": "integer"},
+                "category_code": {"type": "string"},
+                "subcategory_code": {"type": "string"},
+                "source": {"type": "string", "enum": ["telegram", "gmail", "manual"]},
+                "metadata": {"type": "object", "description": "Debe incluir source_event_id si está disponible."},
+            }, "required": ["date", "concept", "amount", "transaction_type", "status"]},
+        },
 - Contrato de fecha de la API para transacciones:
   - usa `DD/MM/YYYY` si conocés el año
   - usa `DD/MM` si estás usando la fecha actual del mensaje
@@ -520,7 +521,7 @@ def _build_tool_map(api: RailsApiPort, messenger: MessengerPort, now: datetime, 
         financial_context_wizard.trigger(api, messenger)
         return {"ok": True, "message": "Wizard iniciado en Telegram."}
 
-    return {
+    tool_map = {
         "get_summary":               lambda _: api.get_summary(month, year),
         "get_transactions":          lambda p: api.get_transactions(p.get("month", month), p.get("year", year)),
         "get_recent_transactions":   _get_recent_transactions,
@@ -531,23 +532,54 @@ def _build_tool_map(api: RailsApiPort, messenger: MessengerPort, now: datetime, 
         "get_financial_context":     lambda _: api.get_financial_context(),
         "get_income_sources":        lambda _: api.get_income_sources(),
         "get_recurring_obligations": lambda _: api.get_recurring_obligations(),
-
-        "create_transaction":        lambda p: _post("/api/v1/transactions", p),
+        "create_transaction":        lambda p: _post("/api/v1/transactions", _enrich_with_source_event_id(p)),
         "update_transaction":        lambda p: _patch(f"/api/v1/transactions/{p.pop('id')}", p),
         "delete_transaction":        lambda p: _delete(f"/api/v1/transactions/{p['id']}"),
-
-        "update_financial_context":       lambda p: api.update_financial_context(**p),
+        "update_financial_context":  lambda p: api.update_financial_context(**p),
         "trigger_financial_context_wizard": trigger_fc_wizard,
-
         "update_debt":  lambda p: _patch(f"/api/v1/debts/{p.pop('id')}", p),
         "delete_debt":  lambda p: _delete(f"/api/v1/debts/{p['id']}"),
-
         "create_recurring_obligation": lambda p: _post("/api/v1/recurring_obligations", p),
         "update_recurring_obligation": lambda p: _patch(f"/api/v1/recurring_obligations/{p.pop('id')}", p),
         "delete_recurring_obligation": lambda p: _delete(f"/api/v1/recurring_obligations/{p['id']}"),
-
         "send_telegram": lambda p: state.update({"responded": True}) or _send_telegram(messenger, p) or {},
     }
+    return tool_map
+
+# ---
+# Enriquecer payload con source_event_id para idempotencia técnica
+def _enrich_with_source_event_id(payload):
+    import inspect
+    frame = inspect.currentframe()
+    # Detectar si viene de Telegram y hay update/message
+    update = payload.get("_telegram_update") or (frame.f_back.f_locals.get("update") if frame and frame.f_back else None)
+    if payload.get("source") == "telegram" and update:
+        message_id = getattr(getattr(update, "message", None), "message_id", None)
+        update_id = getattr(update, "update_id", None)
+        if message_id:
+            payload.setdefault("metadata", {})["source_event_id"] = f"telegram:message:{message_id}"
+        elif update_id:
+            payload.setdefault("metadata", {})["source_event_id"] = f"telegram:update:{update_id}"
+    return payload
+
+# ---
+# Mejorar razonamiento para deduplicación semántica y correcciones
+def decide_transaction_action(user_message, recent_transactions):
+    """
+    Decide si crear, actualizar o ignorar una transacción según el mensaje y contexto.
+    - Si el usuario dice "me equivoqué", "corrige", "no era pollo", busca la transacción más reciente y sugiere update_transaction.
+    - Si el mensaje es igual a uno reciente (por source_event_id), ignora o reintenta.
+    - Si es un gasto nuevo, usa create_transaction.
+    """
+    msg = user_message.lower()
+    if any(kw in msg for kw in ["me equivoqué", "corrige", "no era", "corrige el anterior", "era(n)"]):
+        # Buscar la transacción más reciente para update
+        if recent_transactions:
+            return "update_transaction", recent_transactions[0]
+    # Si el mensaje es igual a uno reciente por source_event_id, ignorar
+    if recent_transactions and "source_event_id" in recent_transactions[0].get("metadata", {}):
+        return "ignore", None
+    return "create_transaction", None
 
 
 def _send_telegram(messenger: MessengerPort, payload: dict) -> dict:

@@ -49,7 +49,10 @@ class RailsHttpAdapter(RailsApiPort):
 
     def _post(self, path: str, body: dict | list) -> dict | list:
         url = f"{BASE_URL}{path}"
-        resp = httpx.post(url, headers=_headers(), json=body, timeout=TIMEOUT)
+            resp = httpx.post(url, headers=_headers(), json=body, timeout=TIMEOUT)
+            # Asegurar que metadata se envía como objeto
+            if "metadata" in body and body["metadata"] is not None:
+                body["metadata"] = dict(body["metadata"])
         resp.raise_for_status()
         data = resp.json()
         return data.get("data", data) if isinstance(data, dict) and "data" in data else data
