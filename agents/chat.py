@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 COLOMBIA_TZ = timezone(timedelta(hours=-5))
 
 API_URL   = API_BASE_URL
-CHAT_MODEL = "claude-haiku-4-5"
+CHAT_MODEL = "claude-sonnet-4-6"
 
 SYSTEM_PROMPT = """\
 Sos el asistente financiero personal de Daniel, un coach financiero real que
