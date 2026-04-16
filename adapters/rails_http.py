@@ -142,6 +142,21 @@ class RailsHttpAdapter(RailsApiPort):
         data = self._post("/api/v1/budgets", {"budgets": budgets})
         return data if isinstance(data, list) else data.get("data", [])
 
+    # --- monthly plans ---
+
+    def get_current_monthly_plan(self, month: int, year: int) -> dict | None:
+        data = self._get("/api/v1/monthly_plans/current", {"month": month, "year": year})
+        return data.get("data") if isinstance(data, dict) else None
+
+    def generate_monthly_plan(self, month: int, year: int, mode: str = "conservative") -> dict:
+        return self._post("/api/v1/monthly_plans/generate", {"month": month, "year": year, "mode": mode})
+
+    def confirm_monthly_plan(self, plan_id: int | str, *, budgets: list[dict] | None = None, **attrs) -> dict:
+        body = {**attrs}
+        if budgets is not None:
+          body["budgets"] = budgets
+        return self._post(f"/api/v1/monthly_plans/{plan_id}/confirm", body)
+
     # --- debts ---
 
     def get_debts(self) -> list[dict]:

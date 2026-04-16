@@ -305,6 +305,85 @@ def _handle_message(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# HELPERS DE DOMINIO
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _current_period() -> tuple[int, int]:
+    now = _now_col()
+    return now.month, now.year
+
+
+def _month_name(month: int) -> str:
+    return ["enero", "febrero", "marzo", "abril", "mayo", "junio",
+            "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"][month - 1]
+
+
+def _active_income_sources(api: RailsApiPort) -> list[dict]:
+    return [source for source in api.get_income_sources() if source.get("active", True)]
+
+
+def _source_classification(source: dict) -> str:
+    classification = source.get("classification")
+    if classification:
+        return classification
+    return "variable" if source.get("is_variable") else "base"
+
+
+def _income_breakdown(api: RailsApiPort) -> tuple[list[dict], list[dict]]:
+    sources = _active_income_sources(api)
+    base = [source for source in sources if _source_classification(source) == "base"]
+    variable = [source for source in sources if _source_classification(source) != "base"]
+    return base, variable
+
+
+def _committed_breakdown(api: RailsApiPort) -> tuple[list[str], int]:
+    lines: list[str] = []
+    recurring_total = 0
+
+    for obligation in api.get_recurring_obligations():
+        if not obligation.get("active", True):
+            continue
+        if obligation.get("allocatable_type") == "Debt":
+            continue
+        amount = int(obligation.get("amount", 0) or 0)
+        recurring_total += amount
+        lines.append(f"• {obligation.get('name', 'Obligación')}: {_fmt_cop(amount)}")
+
+    debt_total = 0
+    for debt in api.get_debts():
+        if debt.get("status") != "active":
+            continue
+        payment = int(debt.get("monthly_payment", 0) or 0)
+        debt_total += payment
+        lines.append(f"• {debt.get('name', 'Deuda')}: {_fmt_cop(payment)}")
+
+    return lines, recurring_total + debt_total
+
+
+def _get_or_generate_plan(api: RailsApiPort, *, mode: str = "conservative") -> dict:
+    month, year = _current_period()
+    plan = api.get_current_monthly_plan(month, year)
+    if plan:
+        return plan
+    return api.generate_monthly_plan(month, year, mode=mode)
+
+
+def _plan_spendable_income(plan: dict) -> int:
+    assumptions = plan.get("assumptions") or {}
+    return int(assumptions.get("planning_income_used") or plan.get("base_budget_income") or 0)
+
+
+def _resolve_budget_categories(api: RailsApiPort) -> dict[str, int]:
+    mapping: dict[str, int] = {}
+    for category in api.get_categories():
+        code = category.get("code")
+        category_id = category.get("id")
+        if code and category_id:
+            mapping[code] = category_id
+    return mapping
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # STEPS
 # ══════════════════════════════════════════════════════════════════════════════
 
@@ -336,25 +415,35 @@ def _go_to_step(
 
 
 def _send_step_1(api: RailsApiPort, messenger: MessengerPort, ctx: dict) -> None:
-    fc = api.get_financial_context()
-    if not fc:
+    base_sources, variable_sources = _income_breakdown(api)
+    if not base_sources and not variable_sources:
         messenger.send_message(
-            "Antes de planificar necesito conocer tus ingresos. "
-            "¿Cuánto recibes en la primera quincena (Acme) y en la segunda (Globex)? "
-            "Escríbeme los dos montos."
+            "Antes de planificar necesito al menos una fuente de ingreso registrada. "
+            "Primero define tu ingreso base confiable y luego volvemos al plan."
         )
         return
 
-    income_1 = fc.get("monthly_income_1", 0)
-    income_2 = fc.get("monthly_income_2", 0)
-    day_1 = fc.get("income_day_1", "?")
-    day_2 = fc.get("income_day_2", "?")
+    lines = []
+    if base_sources:
+        lines.append("Ingreso base confiable:")
+        lines.extend(
+            f"• {source['name']} ({source['expected_day_from']}-{source['expected_day_to']}): "
+            f"<b>{_fmt_cop(int(source.get('expected_amount', 0) or 0))}</b>"
+            for source in base_sources
+        )
+    if variable_sources:
+        lines.append("")
+        lines.append("Ingresos variables / extra:")
+        lines.extend(
+            f"• {source['name']} ({source['expected_day_from']}-{source['expected_day_to']}): "
+            f"~<b>{_fmt_cop(int(source.get('expected_amount', 0) or 0))}</b>"
+            for source in variable_sources
+        )
 
     messenger.send_with_buttons(
         text=(
-            f"Este mes esperas:\n"
-            f"• Acme el día {day_1}: <b>{_fmt_cop(income_1)}</b>\n"
-            f"• Globex el día {day_2}: ~<b>{_fmt_cop(income_2)}</b>\n\n"
+            "Este mes tengo registradas estas fuentes de ingreso:\n\n"
+            f"{chr(10).join(lines)}\n\n"
             f"¿Es correcto o cambió algo?"
         ),
         buttons=[
@@ -365,28 +454,14 @@ def _send_step_1(api: RailsApiPort, messenger: MessengerPort, ctx: dict) -> None
 
 
 def _send_step_2(api: RailsApiPort, messenger: MessengerPort, ctx: dict) -> None:
-    debts = api.get_debts()
-    active_debts = [d for d in debts if d.get("status") == "active"]
-    fc = api.get_financial_context()
-    income_day_1 = fc.get("income_day_1", "?") if fc else "?"
-
-    lines = []
-    total = 0
-    for d in active_debts:
-        pago = d.get("monthly_payment", 0)
-        total += pago
-        lines.append(f"• {d['name']}: {_fmt_cop(pago)}")
-
-    # Arriendo (desde financial_context o default conocido)
-    arriendo = fc.get("monthly_rent", 2_500_000) if fc else 2_500_000
-    total += arriendo
-    lines_text = f"• Arriendo: {_fmt_cop(arriendo)}\n" + "\n".join(lines)
+    lines, total = _committed_breakdown(api)
+    lines_text = "\n".join(lines) if lines else "• No encontré obligaciones estructurales registradas"
 
     messenger.send_with_buttons(
         text=(
             f"Tus gastos fijos este mes:\n{lines_text}\n\n"
             f"<b>Total comprometido: {_fmt_cop(total)}</b>\n"
-            f"Estos salen principalmente de tu primera quincena (día {income_day_1}). ¿Ok?"
+            "¿Esto sigue correcto?"
         ),
         buttons=[
             [{"text": "Ok ✓", "callback_data": "wz2:ok"}],
@@ -404,7 +479,10 @@ def _send_step_3(api: RailsApiPort, messenger: MessengerPort, ctx: dict) -> None
 
     if not active:
         ctx["abono_extra"] = 0
-        _go_to_step(api, messenger, action_id, ctx, 4)
+        messenger.send_with_buttons(
+            text="No veo deudas activas para acelerar este mes. Continuemos con el presupuesto base.",
+            buttons=[[{"text": "Continuar ✓", "callback_data": "wz3:no"}]],
+        )
         return
 
     if strategy == "snowball":
@@ -438,12 +516,10 @@ def _send_step_3(api: RailsApiPort, messenger: MessengerPort, ctx: dict) -> None
 
 
 def _send_step_4(api: RailsApiPort, messenger: MessengerPort, ctx: dict) -> None:
-    now = _now_col()
-    # Últimos 3 meses de gasto en necesario
     sugerido = ctx.get("budget_necessary_sugerido")
     if not sugerido:
-        fc = api.get_financial_context()
-        income = ((fc.get("monthly_income_1", 0) + fc.get("monthly_income_2", 0)) if fc else 6_000_000)
+        plan = _get_or_generate_plan(api)
+        income = max(_plan_spendable_income(plan), 1)
         sugerido = proponer_presupuesto("necessary", [], income)
         ctx["budget_necessary_sugerido"] = sugerido
 
@@ -463,9 +539,10 @@ def _send_step_4(api: RailsApiPort, messenger: MessengerPort, ctx: dict) -> None
 def _send_step_5(api: RailsApiPort, messenger: MessengerPort, ctx: dict) -> None:
     sugerido = ctx.get("budget_discretionary_sugerido")
     if not sugerido:
-        fc = api.get_financial_context()
-        income = ((fc.get("monthly_income_1", 0) + fc.get("monthly_income_2", 0)) if fc else 6_000_000)
-        sugerido = proponer_presupuesto("discretionary", [], income)
+        plan = _get_or_generate_plan(api)
+        sugerido = int(plan.get("discretionary_limit", 0) or 0)
+        if sugerido <= 0:
+            sugerido = proponer_presupuesto("discretionary", [], max(_plan_spendable_income(plan), 1))
         ctx["budget_discretionary_sugerido"] = sugerido
 
     messenger.send_with_buttons(
@@ -487,16 +564,15 @@ def _send_step_6(api: RailsApiPort, messenger: MessengerPort, ctx: dict) -> None
     reward_pct = ctx.get("reward_pct", fc.get("reward_pct", 5) if fc else 5)
     ctx["reward_pct"] = reward_pct
 
-    # Calcular excedente estimado
-    income = 0
-    if fc:
-        income = fc.get("monthly_income_1", 0) + fc.get("monthly_income_2", 0)
-    committed = ctx.get("total_committed", 0)
+    plan = _get_or_generate_plan(api)
+    income = int(plan.get("base_budget_income", 0) or 0)
+    committed = int(plan.get("recurring_obligations_total", 0) or 0) + int(plan.get("debt_minimums_total", 0) or 0)
     necessary = ctx.get("budget_necessary", ctx.get("budget_necessary_sugerido", 0))
     discretionary = ctx.get("budget_discretionary", ctx.get("budget_discretionary_sugerido", 0))
     abono = ctx.get("abono_extra", 0)
-    excedente = income - committed - necessary - discretionary - abono
-    recompensa = round((excedente * reward_pct / 100) / 1000) * 1000
+    buffer = int(plan.get("protected_buffer_amount", 0) or 0)
+    excedente = income - committed - necessary - discretionary - abono - buffer
+    recompensa = round((max(excedente, 0) * reward_pct / 100) / 1000) * 1000
 
     ctx["excedente_estimado"] = excedente
 
@@ -515,69 +591,61 @@ def _send_step_6(api: RailsApiPort, messenger: MessengerPort, ctx: dict) -> None
 
 
 def _send_step_7(api: RailsApiPort, messenger: MessengerPort, ctx: dict) -> None:
-    fc = api.get_financial_context()
-    income_1 = fc.get("monthly_income_1", 0) if fc else 0
-    income_2 = fc.get("monthly_income_2", 0) if fc else 0
-    day_1 = fc.get("income_day_1", "?") if fc else "?"
-    day_2 = fc.get("income_day_2", "?") if fc else "?"
+    month, year = _current_period()
+    plan = _get_or_generate_plan(api)
+    base_sources, variable_sources = _income_breakdown(api)
+    base_income = int(plan.get("base_budget_income", 0) or 0)
+    variable_income = int(plan.get("expected_variable_income", 0) or 0)
 
-    committed = ctx.get("total_committed", 0)
+    committed = int(plan.get("recurring_obligations_total", 0) or 0) + int(plan.get("debt_minimums_total", 0) or 0)
     abono = ctx.get("abono_extra", 0)
     necessary = ctx.get("budget_necessary", ctx.get("budget_necessary_sugerido", 0))
     discretionary = ctx.get("budget_discretionary", ctx.get("budget_discretionary_sugerido", 0))
     reward_pct = ctx.get("reward_pct", 5)
+    buffer = int(plan.get("protected_buffer_amount", 0) or 0)
 
-    excedente = income_1 + income_2 - committed - abono - necessary - discretionary
-    recompensa = round((excedente * reward_pct / 100) / 1000) * 1000
+    excedente = base_income - committed - abono - necessary - discretionary - buffer
+    recompensa = round((max(excedente, 0) * reward_pct / 100) / 1000) * 1000
     resto = excedente - recompensa
 
-    debts = api.get_debts()
-    active_debts = [d for d in debts if d.get("status") == "active"]
     abono_name = ctx.get("abono_target_name", "")
+    mes_nombre = _month_name(month).capitalize()
 
-    # Asignar gastos a quincenas según income_day
-    arriendo = fc.get("monthly_rent", 2_500_000) if fc else 2_500_000
-    q1_gastos = arriendo + abono + sum(
-        d["monthly_payment"] for d in active_debts
-        if d.get("name") in ["Préstamo Personal"]  # ejemplo — en prod viene del contexto
-    )
-    q1_queda = income_1 - q1_gastos
+    base_lines = "\n".join(
+        f"• {source['name']}: {_fmt_cop(int(source.get('expected_amount', 0) or 0))}"
+        for source in base_sources
+    ) or "• Sin ingresos base registrados"
 
-    q2_gastos = necessary + discretionary + sum(
-        d["monthly_payment"] for d in active_debts
-        if d.get("name") not in ["Préstamo Personal"]
-    )
-    q2_queda = income_2 - q2_gastos
-
-    now = _now_col()
-    mes_nombre = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
-                  "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"][now.month - 1].capitalize()
+    variable_lines = "\n".join(
+        f"• {source['name']}: {_fmt_cop(int(source.get('expected_amount', 0) or 0))}"
+        for source in variable_sources
+    ) or "• Sin ingresos extra registrados"
 
     alerta = ""
     if excedente < 0:
         alerta = f"\n\n⚠️ <b>Déficit proyectado: {_fmt_cop(abs(excedente))}</b> — revisa discrecional o abono extra."
 
-    plan = (
-        f"📋 <b>Plan de caja — {mes_nombre} {now.year}</b>\n\n"
-        f"<b>Quincena 1</b> (día {day_1} — Acme {_fmt_cop(income_1)}):\n"
-        f"✓ Arriendo: -{_fmt_cop(arriendo)}\n"
-        f"✓ Cuotas fijas Q1: -{_fmt_cop(q1_gastos - arriendo)}\n"
-        + (f"✓ Abono extra {abono_name}: -{_fmt_cop(abono)}\n" if abono else "")
-        + f"Queda en mano: <b>{_fmt_cop(q1_queda)}</b>\n\n"
-        f"<b>Quincena 2</b> (día {day_2} — Globex ~{_fmt_cop(income_2)}):\n"
-        f"✓ Cuotas fijas Q2: -{_fmt_cop(q2_gastos - necessary - discretionary)}\n"
-        f"✓ Necesario: -{_fmt_cop(necessary)}\n"
-        f"✓ Discrecional: -{_fmt_cop(discretionary)}\n"
-        f"Queda en mano: <b>{_fmt_cop(q2_queda)}</b>\n\n"
-        f"💰 Excedente proyectado: <b>{_fmt_cop(excedente)}</b>\n"
-        f"🎁 Tu recompensa si cumples: <b>{_fmt_cop(recompensa)}</b> ({reward_pct}%)\n"
-        f"📈 Resto para metas/ahorro: <b>{_fmt_cop(resto)}</b>"
+    plan_text = (
+        f"📋 <b>Plan del mes — {mes_nombre} {year}</b>\n\n"
+        f"<b>Ingreso base presupuestable</b>\n{base_lines}\n"
+        f"Total base: <b>{_fmt_cop(base_income)}</b>\n\n"
+        f"<b>Ingresos variables / overflow</b>\n{variable_lines}\n"
+        f"Total variable esperado: <b>{_fmt_cop(variable_income)}</b>\n\n"
+        f"<b>Comprometido</b>: -{_fmt_cop(committed)}\n"
+        f"<b>Buffer protegido</b>: -{_fmt_cop(buffer)}\n"
+        f"<b>Necesario</b>: -{_fmt_cop(necessary)}\n"
+        f"<b>Discrecional</b>: -{_fmt_cop(discretionary)}\n"
+        + (f"<b>Abono extra {abono_name}</b>: -{_fmt_cop(abono)}\n" if abono else "")
+        + f"💰 Excedente proyectado: <b>{_fmt_cop(excedente)}</b>\n"
+        + f"🎁 Tu recompensa si cumples: <b>{_fmt_cop(recompensa)}</b> ({reward_pct}%)\n"
+        + f"↪️ Overflow rule: <b>{plan.get('overflow_rule', 'debt')}</b>\n"
+        + f"📈 Resto para metas/ahorro: <b>{_fmt_cop(resto)}</b>"
         + alerta
         + "\n\n¿Aprobamos este plan?"
     )
 
     messenger.send_with_buttons(
-        text=plan,
+        text=plan_text,
         buttons=[
             [{"text": "Aprobar ✓", "callback_data": "wz7:approve"}],
             [{"text": "Ajustar algo", "callback_data": "wz7:adjust"}],
@@ -586,25 +654,38 @@ def _send_step_7(api: RailsApiPort, messenger: MessengerPort, ctx: dict) -> None
 
 
 def _step_8_save(api: RailsApiPort, messenger: MessengerPort, action_id: int | str, ctx: dict) -> None:
-    now = _now_col()
+    plan = _get_or_generate_plan(api)
+    category_ids = _resolve_budget_categories(api)
 
-    # Construir la lista de budgets para enviar en bulk
-    # En una iteración real, esto mapearía category_id desde la API
-    budgets = []
-
-    # Por ahora placeholder — en la implementación final se obtienen los category_id reales
-    # La estructura correcta se define cuando se implementen las migraciones de Rails
-    committed = ctx.get("total_committed", 0)
+    committed = int(plan.get("recurring_obligations_total", 0) or 0) + int(plan.get("debt_minimums_total", 0) or 0)
     necessary = ctx.get("budget_necessary", 0)
     discretionary = ctx.get("budget_discretionary", 0)
     reward_pct = ctx.get("reward_pct", 5)
+    abono_extra = ctx.get("abono_extra", 0)
 
-    # TODO: obtener category_ids reales desde api.get_categories()
-    # y mapear por nombre/slug
+    budgets = []
+    if category_ids.get("committed"):
+        budgets.append({"category_id": category_ids["committed"], "amount_limit": committed})
+    if category_ids.get("necessary") and necessary:
+        budgets.append({"category_id": category_ids["necessary"], "amount_limit": necessary})
+    if category_ids.get("discretionary") and discretionary:
+        budgets.append({"category_id": category_ids["discretionary"], "amount_limit": discretionary})
+
+    assumptions = dict(plan.get("assumptions") or {})
+    assumptions.update({
+        "necessary_budget": necessary,
+        "abono_extra": abono_extra,
+        "wizard_confirmed_at": _now_col().isoformat(),
+    })
 
     try:
-        if budgets:
-            api.create_budgets_bulk(budgets)
+        api.confirm_monthly_plan(
+            plan["id"],
+            budgets=budgets,
+            discretionary_limit=discretionary,
+            reward_pct=reward_pct,
+            assumptions=assumptions,
+        )
 
         if reward_pct:
             api.update_financial_context(reward_pct=reward_pct)

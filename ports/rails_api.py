@@ -72,6 +72,21 @@ class RailsApiPort(ABC):
         ...
 
     @abstractmethod
+    def get_current_monthly_plan(self, month: int, year: int) -> dict | None:
+        """GET /api/v1/monthly_plans/current?month=&year="""
+        ...
+
+    @abstractmethod
+    def generate_monthly_plan(self, month: int, year: int, mode: str = "conservative") -> dict:
+        """POST /api/v1/monthly_plans/generate"""
+        ...
+
+    @abstractmethod
+    def confirm_monthly_plan(self, plan_id: int | str, *, budgets: list[dict] | None = None, **attrs) -> dict:
+        """POST /api/v1/monthly_plans/:id/confirm"""
+        ...
+
+    @abstractmethod
     def get_debts(self) -> list[dict]:
         """GET /api/v1/debts"""
         ...
