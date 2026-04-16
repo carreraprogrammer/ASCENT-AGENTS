@@ -56,6 +56,14 @@ Reglas:
 - Para crear o actualizar transacciones:
   - la API espera date en DD/MM/YYYY o DD/MM
   - no uses YYYY-MM-DD
+- Si registrás un gasto o ingreso, la respuesta final debe incluir una lectura conductual mínima:
+  - discretionary → marcá que fue discrecional o elegido
+  - investment → marcá que construye futuro
+  - committed → marcá que es carga fija o comprometida
+  - necessary → marcá que es necesario o de mantenimiento
+  - social → marcá que es social / vínculo
+  - income → marcá que es ingreso / entrada
+- Esa lectura debe ser breve. Ejemplo válido: "✅ Registrado: $14.000 en tamales. Fue discrecional."
 - Al final usá send_telegram una sola vez.
 """
 
