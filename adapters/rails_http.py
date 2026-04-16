@@ -49,10 +49,11 @@ class RailsHttpAdapter(RailsApiPort):
 
     def _post(self, path: str, body: dict | list) -> dict | list:
         url = f"{BASE_URL}{path}"
-            resp = httpx.post(url, headers=_headers(), json=body, timeout=TIMEOUT)
-            # Asegurar que metadata se envía como objeto
-            if "metadata" in body and body["metadata"] is not None:
-                body["metadata"] = dict(body["metadata"])
+        payload = body
+        if isinstance(body, dict) and "metadata" in body and body["metadata"] is not None:
+            payload = {**body, "metadata": dict(body["metadata"])}
+
+        resp = httpx.post(url, headers=_headers(), json=payload, timeout=TIMEOUT)
         resp.raise_for_status()
         data = resp.json()
         return data.get("data", data) if isinstance(data, dict) and "data" in data else data
@@ -72,7 +73,7 @@ class RailsHttpAdapter(RailsApiPort):
     # --- transactions ---
 
     def get_transactions(self, month: int, year: int) -> list[dict]:
-        data = self._get("/api/v1/transactions", {"month": month, "year": year})
+        data = self._get("/api/v1/transactions", {"month": month, "year": year, "page": 1, "per_page": 100})
         return data if isinstance(data, list) else data.get("data", [])
 
     def get_pending_transactions(self) -> list[dict]:
