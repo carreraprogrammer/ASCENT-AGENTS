@@ -112,6 +112,21 @@ class RailsApiPort(ABC):
         ...
 
     @abstractmethod
+    def create_income_source(
+        self,
+        *,
+        name: str,
+        expected_amount: int,
+        expected_day_from: int,
+        expected_day_to: int,
+        classification: str = "base",
+        reliability_score: int = 100,
+        is_variable: bool = False,
+    ) -> dict:
+        """POST /api/v1/income_sources"""
+        ...
+
+    @abstractmethod
     def get_recurring_obligations(self) -> list[dict]:
         """GET /api/v1/recurring_obligations"""
         ...

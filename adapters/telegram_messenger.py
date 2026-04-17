@@ -52,6 +52,14 @@ class TelegramMessenger(MessengerPort):
         data    = cq.get("data", "")
         cq_id   = cq.get("id", "")
 
+        if data.startswith("wi:"):
+            return ParsedUpdate(
+                intent=UserIntent.INCOME_WIZARD_CALLBACK,
+                callback_query_id=cq_id,
+                callback_data=data,
+                raw=raw,
+            )
+
         if data.startswith("wz_fc:"):
             return ParsedUpdate(
                 intent=UserIntent.FC_WIZARD_CALLBACK,

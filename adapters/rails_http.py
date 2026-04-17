@@ -182,6 +182,29 @@ class RailsHttpAdapter(RailsApiPort):
         data = self._get("/api/v1/income_sources")
         return data if isinstance(data, list) else data.get("data", [])
 
+    def create_income_source(
+        self,
+        *,
+        name: str,
+        expected_amount: int,
+        expected_day_from: int,
+        expected_day_to: int,
+        classification: str = "base",
+        reliability_score: int = 100,
+        is_variable: bool = False,
+    ) -> dict:
+        payload = {
+            "name": name,
+            "expected_amount": expected_amount,
+            "expected_day_from": expected_day_from,
+            "expected_day_to": expected_day_to,
+            "classification": classification,
+            "reliability_score": reliability_score,
+            "is_variable": is_variable,
+        }
+        result = self._post("/api/v1/income_sources", payload)
+        return result.get("data", result) if isinstance(result, dict) else result
+
     # --- recurring obligations ---
 
     def get_recurring_obligations(self) -> list[dict]:

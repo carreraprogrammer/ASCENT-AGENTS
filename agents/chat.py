@@ -28,6 +28,12 @@ def _apply_preflight(
     result = run_preflight(api, intent=intent, now=now_col)
     action = result.get("action")
 
+    if intent == "income_setup":
+        from flows import income_wizard
+
+        income_wizard.trigger(api, messenger)
+        return None
+
     if action == "block" and (result.get("wizard") or {}).get("type") == "budget_planning":
         from flows import budget_wizard
 

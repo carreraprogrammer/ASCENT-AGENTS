@@ -22,7 +22,7 @@ from fastapi import APIRouter, Request, Response, HTTPException
 
 from adapters.rails_http import RailsHttpAdapter
 from adapters.telegram_messenger import TelegramMessenger
-from flows import budget_wizard, financial_context_wizard
+from flows import budget_wizard, financial_context_wizard, income_wizard
 from services import callback_handler
 from agents import chat as chat_agent
 from ports.messenger import UserIntent
@@ -67,6 +67,22 @@ async def telegram_webhook(request: Request) -> Response:
 
 
 async def _dispatch(api: RailsHttpAdapter, messenger: TelegramMessenger, parsed) -> None:
+
+    # 1a-pre. Callback del income wizard ─────────────────────────────────────
+    if parsed.intent == UserIntent.INCOME_WIZARD_CALLBACK:
+        pending = api.get_active_pending_action()
+        if pending and pending.get("action_type") == "income_setup":
+            income_wizard.handle_update(
+                api=api,
+                messenger=messenger,
+                pending_action=pending,
+                update_type="callback_query",
+                payload=parsed.raw.get("callback_query", {}),
+                callback_query_id=parsed.callback_query_id,
+            )
+        else:
+            messenger.answer_callback(parsed.callback_query_id, "⚠️ Este flujo ya cerró.")
+        return
 
     # 1a. Callback del financial context wizard ───────────────────────────────
     if parsed.intent == UserIntent.FC_WIZARD_CALLBACK:
@@ -131,6 +147,16 @@ async def _dispatch(api: RailsHttpAdapter, messenger: TelegramMessenger, parsed)
         pending = api.get_active_pending_action()
         if pending and pending.get("action_type") == "financial_context_setup":
             financial_context_wizard.handle_update(
+                api=api,
+                messenger=messenger,
+                pending_action=pending,
+                update_type="message",
+                payload=parsed.raw.get("message", {}),
+            )
+            return
+
+        if pending and pending.get("action_type") == "income_setup":
+            income_wizard.handle_update(
                 api=api,
                 messenger=messenger,
                 pending_action=pending,

@@ -14,6 +14,7 @@ class UserIntent:
     """Intents de dominio — sin ningún detalle de Telegram."""
     WIZARD_CALLBACK          = "wizard_callback"          # botón de step del budget wizard
     FC_WIZARD_CALLBACK       = "fc_wizard_callback"       # botón del financial context wizard
+    INCOME_WIZARD_CALLBACK   = "income_wizard_callback"   # botón del income wizard (wi:...)
     WIZARD_TRIGGER           = "wizard_trigger"           # botones de inicio del wizard (start/tomorrow/skip)
     CATEGORIZATION_CALLBACK  = "categorization_callback"  # cat: / confirm: / skip:
     CHAT_CALLBACK            = "chat_callback"            # chat:... respuestas rápidas del chat
