@@ -147,7 +147,11 @@ def build_tools() -> list[dict[str, Any]]:
         },
         {
             "name": "update_financial_context",
-            "description": "Actualiza el contexto financiero.",
+            "description": (
+                "Actualiza el contexto financiero. "
+                "Si el usuario confirma que no tiene deudas, pasá debts_confirmed_at con la fecha de hoy (ISO 8601). "
+                "Eso distingue 'sin deudas confirmadas' de 'no registró sus deudas'."
+            ),
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -158,6 +162,10 @@ def build_tools() -> list[dict[str, Any]]:
                     "strategy": {"type": "string", "enum": ["snowball", "avalanche"]},
                     "reward_pct": {"type": "integer", "minimum": 1, "maximum": 100},
                     "notes": {"type": "string"},
+                    "debts_confirmed_at": {
+                        "type": "string",
+                        "description": "ISO 8601. Setear cuando el usuario confirma explícitamente que no tiene deudas.",
+                    },
                 },
                 "required": [],
             },

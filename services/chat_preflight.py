@@ -23,14 +23,31 @@ def detect_preflight_intent(*, command: str | None = None, text: str | None = No
         "planifi",
         "plan mensual",
         "armemos el mes",
+        "organizar el mes",
+        "organicemos",
+        "armar el mes",
+        "cuánto puedo gastar",
+        "cuanto puedo gastar",
+        "de cuánto dispongo",
+        "de cuanto dispongo",
+        "límite",
+        "limite del mes",
     )
     overflow_markers = (
         "ingreso extra",
         "plata extra",
         "extra que entró",
+        "extra que entro",
         "overflow",
         "qué hago con este ingreso",
         "que hago con este ingreso",
+        "qué hago con esta plata",
+        "que hago con esta plata",
+        "llegó plata",
+        "llego plata",
+        "me pagaron",
+        "cobré",
+        "cobre",
     )
     monthly_status_markers = (
         "cómo voy este mes",
@@ -39,6 +56,26 @@ def detect_preflight_intent(*, command: str | None = None, text: str | None = No
         "como voy en abril",
         "cómo voy en el mes",
         "como voy en el mes",
+        "cómo quedé",
+        "como quede",
+        "cómo voy",
+        "como voy",
+        "en qué voy",
+        "en que voy",
+        "cómo estoy",
+        "como estoy",
+        "resumen del mes",
+        "qué tal voy",
+        "que tal voy",
+    )
+    debt_markers = (
+        "deuda",
+        "cuánto debo",
+        "cuanto debo",
+        "mis deudas",
+        "estado de deuda",
+        "cuánto me falta",
+        "cuanto me falta",
     )
 
     if any(marker in normalized_text for marker in budgeting_markers):
@@ -49,6 +86,9 @@ def detect_preflight_intent(*, command: str | None = None, text: str | None = No
 
     if any(marker in normalized_text for marker in monthly_status_markers):
         return "monthly_status"
+
+    if any(marker in normalized_text for marker in debt_markers):
+        return "debt_status"
 
     return None
 

@@ -71,6 +71,15 @@ def trigger_planning(api: RailsApiPort, messenger: MessengerPort) -> None:
         logger.info("[budget_wizard] PendingAction activo encontrado (%s), skip trigger.", existing.get("id"))
         return
 
+    income_sources = api.get_income_sources()
+    if not income_sources:
+        messenger.send_message(
+            "Es quincena, pero antes de planificar necesito conocer tus ingresos.\n\n"
+            "Decime: <b>¿cuál es el ingreso que con más seguridad te entra cada mes?</b> "
+            "(por ejemplo: <i>Salario Acme 6.400.000</i>)"
+        )
+        return
+
     ctx = api.get_financial_context()
     now = _now_col()
     mes_nombre = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
@@ -92,6 +101,7 @@ def trigger_planning(api: RailsApiPort, messenger: MessengerPort) -> None:
 def trigger(api: RailsApiPort, messenger: MessengerPort, reason: str | None = None) -> dict | None:
     """
     Inicia o retoma el wizard mensual desde el chat o el preflight.
+    Aborta si no hay income sources — un plan con base_budget_income=0 es peor que no tener plan.
     """
     existing = api.get_active_pending_action()
     if existing and existing.get("action_type") == "budget_planning":
@@ -105,6 +115,15 @@ def trigger(api: RailsApiPort, messenger: MessengerPort, reason: str | None = No
             existing.get("current_step") or 1,
         )
         return existing
+
+    income_sources = api.get_income_sources()
+    if not income_sources:
+        messenger.send_message(
+            "Para armar un plan mensual real necesito primero conocer tus ingresos.\n\n"
+            "Decime: <b>¿cuál es el ingreso que con más seguridad te entra cada mes?</b> "
+            "(nombre y monto, por ejemplo: <i>Salario Acme 6.400.000</i>)"
+        )
+        return None
 
     action = api.create_pending_action(
         action_type="budget_planning",

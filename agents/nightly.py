@@ -188,6 +188,21 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort) -> dict:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def get_completeness(_input: dict) -> dict:
+        """Estado de completitud del contexto financiero del usuario."""
+        try:
+            import httpx
+            r = httpx.get(
+                f"{API_BASE_URL}/api/v1/completeness",
+                headers=build_auth_headers(),
+                params={"month": now_col.month, "year": now_col.year},
+                timeout=15,
+            )
+            r.raise_for_status()
+            return {"ok": True, **r.json().get("data", {})}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def create_transaction(inp: dict) -> dict:
         try:
             import httpx
@@ -250,6 +265,7 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort) -> dict:
             return {"ok": False, "error": str(e)}
 
     return {
+        "get_completeness":         get_completeness,
         "get_telegram_messages":    get_telegram_messages,
         "get_gmail_emails":         get_gmail_emails,
         "get_transactions":         get_transactions,
@@ -267,10 +283,18 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort) -> dict:
 
 TOOLS = [
     {
+        "name": "get_completeness",
+        "description": (
+            "Estado de completitud del contexto financiero: income_profile, debts, recurring_expenses, strategy, monthly_plan. "
+            "Llámalo PRIMERO. Si hay dimensiones missing o partial, inclúyelas al final del reporte como sección ⚙️ de gaps."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
         "name": "get_summary",
         "description": (
             "Resumen completo del mes: balance, burn_rate por categoría, monthly_plan, overflow_status, deudas y contexto financiero. "
-            "Llámalo AL INICIO para ver alertas de presupuesto, estado del plan del mes y si ya entró ingreso extra sobre la base. "
+            "Llámalo después de get_completeness para ver alertas de presupuesto y estado del plan del mes. "
             "Si burn_rate.categories tiene alertas, inclúyelas en el mensaje de Telegram."
         ),
         "input_schema": {"type": "object", "properties": {}, "required": []},
@@ -498,30 +522,38 @@ Si get_telegram_messages devuelve resolved_callbacks:
   - type "skip":       update_transaction(id=..., clarification_resolved_at=fecha_hoy)
 
 ═══ FLUJO RECOMENDADO ═══
-1. get_summary → alertas de presupuesto + estado plan quincenal + overflow si aplica
-2. get_telegram_messages → transacciones ya registradas hoy desde el chat (source=telegram)
-3. get_gmail_emails → cargos bancarios del día
-4. Cruzar Gmail vs Telegram: si coinciden monto+producto → mismo gasto, NO duplicar
-5. get_transactions → lista completa del mes para dedup adicional (NO para balance)
-6. get_balance → balance real (SIEMPRE antes del resumen)
-7. get_pending_transactions → pendientes de días anteriores
-8. Registrar solo los gastos de Gmail que NO estén ya en Telegram/transactions → create_transaction
-9. Para gastos inciertos → create_transaction(pending) + send_telegram con botones
-10. send_telegram → resumen usando números de get_balance directamente
+1. get_completeness → detectar gaps de contexto ANTES de todo
+2. get_summary → alertas de presupuesto + estado plan quincenal + overflow si aplica
+3. get_telegram_messages → transacciones ya registradas hoy desde el chat (source=telegram)
+4. get_gmail_emails → cargos bancarios del día
+5. Cruzar Gmail vs Telegram: si coinciden monto+producto → mismo gasto, NO duplicar
+6. get_transactions → lista completa del mes para dedup adicional (NO para balance)
+7. get_balance → balance real (SIEMPRE antes del resumen)
+8. get_pending_transactions → pendientes de días anteriores
+9. Registrar solo los gastos de Gmail que NO estén ya en Telegram/transactions → create_transaction
+10. Para gastos inciertos → create_transaction(pending) + send_telegram con botones
+11. send_telegram → resumen con sección ⚙️ de gaps si aplica
 
 ═══ RESUMEN FINAL ═══
 💰 <b>Revisión Daniel 15K — {now_col.strftime("%d/%m/%Y")}</b>
 
 📥 <b>Registrado hoy:</b>
-• [lista gastos]
+• [lista gastos — si no hay nada, decirlo en una línea]
 
 📊 <b>Balance {hoja}:</b>
 [números de get_balance: ingresos, gastos, balance_confirmed]
 
 [coaching 1-2 líneas, específico, honesto]
-[overflow_status si aplica]
 [alertas de burn_rate si aplica]
-[pendientes con botones — UN mensaje por pendiente]"""
+[pendientes con botones — UN mensaje por pendiente]
+
+⚙️ <b>El sistema necesita esto para ayudarte mejor:</b>
+[SOLO si get_completeness devuelve dimensiones missing o partial]
+• income_profile missing → "Necesito conocer tus fuentes de ingreso para armar un plan real."
+• monthly_plan missing → "No hay plan confirmado para este mes. Sin eso el coaching es genérico."
+• strategy missing → "Falta tu estrategia financiera. Escribí 'configurar contexto financiero'."
+• recurring_expenses missing → "Sin gastos fijos registrados no puedo calcular tu margen real."
+[Si completeness está todo sufficient, omitir esta sección completamente]"""
 
 
 def run_nightly(api: RailsApiPort, messenger: MessengerPort) -> None:
