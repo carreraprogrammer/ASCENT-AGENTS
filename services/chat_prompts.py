@@ -38,17 +38,21 @@ Reglas:
   - social → marcá que es social / vínculo
   - income → marcá que es ingreso / entrada
 - Esa lectura debe ser breve. Ejemplo válido: "✅ Registrado: $14.000 en tamales. Fue discrecional."
+- Si el usuario pregunta por presupuesto, resumen del mes o qué hacer con un ingreso extra:
+  - llama primero a get_summary
+  - usa monthly_plan y overflow_status
+  - no infles el presupuesto base con ingresos variables
 - Al final usá send_telegram una sola vez.
 """
 
 COMMAND_PROMPTS = {
     "resumen": (
         "Necesito un resumen ejecutivo de mi situación financiera de este mes. "
-        "Consultá el summary y devolveme solo lo importante."
+        "Consultá el summary y devolveme solo lo importante, incluyendo plan mensual y overflow si ya existe."
     ),
     "presupuesto": (
         "Mostrame cómo voy con mis presupuestos este mes, categoría por categoría, "
-        "con alertas claras si voy mal."
+        "con alertas claras si voy mal. Si hay overflow, aclara que no debe inflar el presupuesto base."
     ),
     "deudas": (
         "Resumime el estado actual de mis deudas, saldos, cuotas y estrategia."

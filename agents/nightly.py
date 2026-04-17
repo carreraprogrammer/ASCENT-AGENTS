@@ -15,7 +15,7 @@ import imaplib
 import email
 import json
 import re
-from datetime import datetime, timezone, timedelta, date
+from datetime import datetime, timezone, timedelta
 
 from ports.rails_api import RailsApiPort
 from ports.messenger import MessengerPort
@@ -60,7 +60,8 @@ def _fetch_gmail_emails() -> dict:
         "somos@nequi.com.co",
         "notificaciones@davivienda.com",
     ]
-    hoy_str = date.today().strftime("%d-%b-%Y")
+    # Use Colombia timezone — nightly runs at 4am UTC = 11pm Colombia (next UTC day)
+    hoy_str = datetime.now(COLOMBIA_TZ).date().strftime("%d-%b-%Y")
     emails = []
     try:
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
@@ -109,67 +110,39 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort) -> dict:
     now_col = datetime.now(COLOMBIA_TZ)
 
     def get_telegram_messages(_input: dict) -> dict:
-        """Lee mensajes del día desde /telegram/updates (Brain los tiene en DB)."""
-        # En la arquitectura Brain, los mensajes ya vienen al webhook
-        # y el Brain los guarda en memoria / DB propia.
-        # Por ahora, delegamos a Rails (compatibility) hasta que el Brain
-        # tenga su propia tabla — esto se refactoriza en la siguiente iteración.
+        """
+        Devuelve las transacciones registradas HOY desde Telegram/chat en tiempo real.
+        Desde el 15-Apr-2026 el Brain procesa mensajes en tiempo real — ya no se guardan
+        en TelegramUpdate de Rails. Las transacciones creadas por el chat tienen source=telegram.
+        """
         try:
-            from adapters.rails_http import RailsHttpAdapter
-            import httpx
-            # Leer updates pendientes del endpoint de Rails
-            adapter = api  # ya es RailsHttpAdapter u otro
-            r = httpx.get(
-                f"{API_BASE_URL}/api/v1/telegram/updates",
-                headers=build_auth_headers(),
-                timeout=15,
-            )
-            r.raise_for_status()
-            data = r.json()
+            hoy = now_col.date().isoformat()
+            txns_raw = api.get_transactions(now_col.month, now_col.year)
 
-            mensajes_24h = []
-            mensajes_recientes = []
-            resolved_callbacks = []
-
-            for update in data.get("updates", []):
-                utype = update["update_type"]
-                payload = update["payload"]
-
-                if utype == "callback_query":
-                    data_str = payload.get("data", "")
-                    preview = payload.get("message", {}).get("text", "")[:80]
-                    parts = data_str.split(":")
-                    action = {"message_preview": preview, "nota": "Ya procesado en tiempo real por el webhook."}
-                    if parts[0] == "cat" and len(parts) == 3:
-                        action.update({"type": "categorize", "transaction_id": parts[1], "subcategory_code": parts[2]})
-                    elif parts[0] == "confirm":
-                        action.update({"type": "confirm", "transaction_id": parts[1]})
-                    elif parts[0] == "skip":
-                        action.update({"type": "skip", "transaction_id": parts[1]})
-                    else:
-                        continue
-                    resolved_callbacks.append(action)
-
-                elif utype == "message":
-                    text = payload.get("text", "")
-                    if not text:
-                        continue
-                    ts_utc = datetime.fromtimestamp(payload.get("date", 0), tz=timezone.utc)
-                    ts_col = ts_utc.astimezone(COLOMBIA_TZ)
-                    horas = (now_col - ts_col).total_seconds() / 3600
-                    entry = {"texto": text, "hora": ts_col.strftime("%H:%M"), "fecha": ts_col.strftime("%d/%m")}
-                    if horas <= 24:
-                        mensajes_24h.append(entry)
-                    elif horas <= 72:
-                        mensajes_recientes.append(entry)
+            telegram_txns = []
+            for t in txns_raw:
+                a = t.get("attributes", t)
+                txn_date = (a.get("date") or "")[:10]
+                if txn_date == hoy and a.get("source") in ("telegram", "chat"):
+                    telegram_txns.append({
+                        "id":       t.get("id"),
+                        "concepto": a.get("concept"),
+                        "monto":    a.get("amount"),
+                        "tipo":     a.get("transaction_type"),
+                        "estado":   a.get("status"),
+                        "fuente":   a.get("source"),
+                        "hora":     a.get("created_at", "")[:16],
+                    })
 
             return {
                 "ok": True,
-                "mensajes_24h": mensajes_24h,
-                "mensajes_recientes": mensajes_recientes,
-                "resolved_callbacks": resolved_callbacks,
-                "total_24h": len(mensajes_24h),
-                "nota": "Callbacks ya ejecutados en tiempo real — no volver a update_transaction para ellos.",
+                "nota": (
+                    "Los mensajes de Telegram se procesan en tiempo real por el chat agent. "
+                    "Estas son las transacciones ya registradas hoy desde el chat. "
+                    "NO volver a registrarlas — ya existen en la DB."
+                ),
+                "transacciones_hoy_telegram": telegram_txns,
+                "total": len(telegram_txns),
             }
         except Exception as e:
             return {"ok": False, "error": str(e)}
@@ -296,15 +269,19 @@ TOOLS = [
     {
         "name": "get_summary",
         "description": (
-            "Resumen completo del mes: balance, burn_rate por categoría, deudas y contexto financiero. "
-            "Llámalo AL INICIO para ver si hay alertas de presupuesto y si el plan del mes está aprobado. "
+            "Resumen completo del mes: balance, burn_rate por categoría, monthly_plan, overflow_status, deudas y contexto financiero. "
+            "Llámalo AL INICIO para ver alertas de presupuesto, estado del plan del mes y si ya entró ingreso extra sobre la base. "
             "Si burn_rate.categories tiene alertas, inclúyelas en el mensaje de Telegram."
         ),
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
         "name": "get_telegram_messages",
-        "description": "Lee mensajes de Telegram de las últimas 24h y callbacks resueltos. Llámalo siempre.",
+        "description": (
+            "Devuelve las transacciones registradas HOY desde Telegram (source=telegram). "
+            "Los mensajes se procesan en tiempo real — esta herramienta muestra lo que el chat agent ya registró. "
+            "Llámala siempre para saber qué reportó Daniel hoy antes de revisar Gmail."
+        ),
         "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
@@ -475,12 +452,12 @@ Cuando Gmail muestra "Abono TC", "Pago TC", "Pago tarjeta", "Pago mínimo":
 3. Dos montos iguales mismo día DISTINTO producto → son distintos, registrar ambos
 4. Verifica contra get_transactions antes de registrar
 
-═══ PARSING TELEGRAM ═══
-- "15k" = 15.000 | "1.5k" = 1.500 | "2M" = 2.000.000
-- "pizza 11500 nequi" → restaurantes, 11500, nequi
-- Miles implícitos: "gasolin 45 debito" → 45000
-- Usa la fecha REAL del mensaje, no la de hoy
-- Mensajes que no son gastos → no registrar
+═══ TELEGRAM EN TIEMPO REAL ═══
+Los mensajes de Telegram se procesan en tiempo real por el chat agent (desde 15-Apr-2026).
+- get_telegram_messages devuelve TRANSACCIONES YA REGISTRADAS hoy con source=telegram
+- NO son mensajes crudos — son transacciones ya en la DB
+- NO volver a registrarlas. Solo úsalas para cruzar con Gmail y detectar duplicados o sin registrar
+- Si hay una transacción en Gmail que coincide con una de Telegram → mismo gasto, no duplicar
 
 ═══ NUEVO: ALERTAS DE PRESUPUESTO ═══
 Si get_summary devuelve burn_rate.categories con alertas:
@@ -492,6 +469,14 @@ Si get_summary devuelve burn_rate.categories con alertas:
 Si es día 1-5 o 15-20 del mes, menciona al final del resumen:
 - Si hay budgets configurados: "✅ Plan del mes aprobado"
 - Si NO hay budgets: "📋 Falta aprobar el plan del mes — el wizard te lo envía esta mañana"
+
+═══ NUEVO: OVERFLOW DEL MES ═══
+Si get_summary devuelve overflow_status:
+- Si overflow_status.status == "available", menciona en una línea:
+  - cuánto ingreso extra ya entró sobre la base del plan
+  - a dónde debería ir según overflow_rule
+- Si status == "waiting", no inventes overflow; solo omite la sección salvo que sea relevante para explicar el mes
+- El ingreso extra NO debe presentarse como permiso para inflar el presupuesto base
 
 ═══ CONTEXTO FINANCIERO ═══
 Si get_summary o get_financial_context devuelve phase=null o data=null:
@@ -513,14 +498,14 @@ Si get_telegram_messages devuelve resolved_callbacks:
   - type "skip":       update_transaction(id=..., clarification_resolved_at=fecha_hoy)
 
 ═══ FLUJO RECOMENDADO ═══
-1. get_summary → alertas de presupuesto + estado plan quincenal
-2. get_telegram_messages → mensajes del día + callbacks resueltos
-3. get_gmail_emails → cargos bancarios
-4. get_transactions → lista para dedup (NO para balance)
-5. get_balance → balance real (SIEMPRE antes del resumen)
-6. get_pending_transactions → pendientes de días anteriores
-7. Si hay resolved_callbacks → update_transaction para cada uno
-8. Deduplicar y registrar gastos nuevos → create_transaction
+1. get_summary → alertas de presupuesto + estado plan quincenal + overflow si aplica
+2. get_telegram_messages → transacciones ya registradas hoy desde el chat (source=telegram)
+3. get_gmail_emails → cargos bancarios del día
+4. Cruzar Gmail vs Telegram: si coinciden monto+producto → mismo gasto, NO duplicar
+5. get_transactions → lista completa del mes para dedup adicional (NO para balance)
+6. get_balance → balance real (SIEMPRE antes del resumen)
+7. get_pending_transactions → pendientes de días anteriores
+8. Registrar solo los gastos de Gmail que NO estén ya en Telegram/transactions → create_transaction
 9. Para gastos inciertos → create_transaction(pending) + send_telegram con botones
 10. send_telegram → resumen usando números de get_balance directamente
 
@@ -534,6 +519,7 @@ Si get_telegram_messages devuelve resolved_callbacks:
 [números de get_balance: ingresos, gastos, balance_confirmed]
 
 [coaching 1-2 líneas, específico, honesto]
+[overflow_status si aplica]
 [alertas de burn_rate si aplica]
 [pendientes con botones — UN mensaje por pendiente]"""
 

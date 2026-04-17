@@ -21,7 +21,7 @@ def build_tools() -> list[dict[str, Any]]:
     return [
         {
             "name": "get_summary",
-            "description": "Resumen financiero del mes: balance, burn rate, deudas y contexto.",
+            "description": "Resumen financiero del mes: balance, burn rate, deudas, monthly_plan, overflow_status y contexto.",
             "input_schema": {
                 "type": "object",
                 "properties": {"month": {"type": "integer"}, "year": {"type": "integer"}},
