@@ -126,6 +126,29 @@ async def _dispatch(api: RailsHttpAdapter, messenger: TelegramMessenger, parsed)
         )
         return
 
+    # 4. Texto mientras hay wizard activo ─────────────────────────────────────
+    if parsed.intent == UserIntent.EXPENSE_REPORT:
+        pending = api.get_active_pending_action()
+        if pending and pending.get("action_type") == "financial_context_setup":
+            financial_context_wizard.handle_update(
+                api=api,
+                messenger=messenger,
+                pending_action=pending,
+                update_type="message",
+                payload=parsed.raw.get("message", {}),
+            )
+            return
+
+        if pending and pending.get("action_type") == "budget_planning":
+            budget_wizard.handle_update(
+                api=api,
+                messenger=messenger,
+                pending_action=pending,
+                update_type="message",
+                payload=parsed.raw.get("message", {}),
+            )
+            return
+
     # 4. Slash command → chat agent en background ──────────────────────────────
     if parsed.intent == UserIntent.COMMAND:
         # create_task: el webhook devuelve 200 inmediatamente

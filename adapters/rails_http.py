@@ -157,6 +157,13 @@ class RailsHttpAdapter(RailsApiPort):
           body["budgets"] = budgets
         return self._post(f"/api/v1/monthly_plans/{plan_id}/confirm", body)
 
+    def get_completeness(self, month: int, year: int) -> dict:
+        data = self._get("/api/v1/completeness", {"month": month, "year": year})
+        return data.get("data", data) if isinstance(data, dict) else {}
+
+    def preflight_agent(self, *, intent: str, month: int, year: int) -> dict:
+        return self._post("/api/v1/agents/preflight", {"intent": intent, "month": month, "year": year})
+
     # --- debts ---
 
     def get_debts(self) -> list[dict]:

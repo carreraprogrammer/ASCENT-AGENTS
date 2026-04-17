@@ -4,11 +4,40 @@ from datetime import datetime
 from ports.messenger import MessengerPort, ParsedUpdate
 from ports.rails_api import RailsApiPort
 from services.chat_context import COLOMBIA_TZ, event_source_id, normalize_telegram_html, telegram_context
+from services.chat_preflight import detect_preflight_intent, inject_soft_nudge, run_preflight
 from services.chat_prompts import CHAT_MODEL, COMMAND_PROMPTS, HELP_TEXT, SYSTEM_PROMPT
 from services.chat_tools import build_tool_map, build_tools
 from services.claude_client import run_agent
 
 logger = logging.getLogger(__name__)
+
+
+def _apply_preflight(
+    api: RailsApiPort,
+    messenger: MessengerPort,
+    *,
+    initial_message: str,
+    command: str | None = None,
+    text: str | None = None,
+) -> str | None:
+    intent = detect_preflight_intent(command=command, text=text)
+    if not intent:
+        return initial_message
+
+    now_col = datetime.now(COLOMBIA_TZ)
+    result = run_preflight(api, intent=intent, now=now_col)
+    action = result.get("action")
+
+    if action == "block" and (result.get("wizard") or {}).get("type") == "budget_planning":
+        from flows import budget_wizard
+
+        budget_wizard.trigger(api, messenger, reason=result.get("message"))
+        return None
+
+    if action == "soft_nudge":
+        return inject_soft_nudge(initial_message, result)
+
+    return initial_message
 
 
 def _run_conversation(
@@ -50,7 +79,17 @@ def handle_command(api: RailsApiPort, messenger: MessengerPort, parsed: ParsedUp
         return
 
     try:
-        _run_conversation(api, messenger, COMMAND_PROMPTS[command], source_event_id=None)
+        initial_message = _apply_preflight(
+            api,
+            messenger,
+            initial_message=COMMAND_PROMPTS[command],
+            command=command,
+            text=parsed.text,
+        )
+        if initial_message is None:
+            return
+
+        _run_conversation(api, messenger, initial_message, source_event_id=None)
     except Exception as exc:
         logger.error("[chat_agent] command error: %s", exc, exc_info=True)
         messenger.send_message("❌ Tuve un problema. Intentá de nuevo.")
@@ -72,6 +111,15 @@ def handle_message(api: RailsApiPort, messenger: MessengerPort, parsed: ParsedUp
     )
 
     try:
+        initial_message = _apply_preflight(
+            api,
+            messenger,
+            initial_message=initial_message,
+            text=text,
+        )
+        if initial_message is None:
+            return
+
         _run_conversation(api, messenger, initial_message, source_event_id=event_source_id(parsed))
     except Exception as exc:
         logger.error("[chat_agent] realtime error: %s", exc, exc_info=True)

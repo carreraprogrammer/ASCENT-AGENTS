@@ -89,6 +89,34 @@ def trigger_planning(api: RailsApiPort, messenger: MessengerPort) -> None:
     )
 
 
+def trigger(api: RailsApiPort, messenger: MessengerPort, reason: str | None = None) -> dict | None:
+    """
+    Inicia o retoma el wizard mensual desde el chat o el preflight.
+    """
+    existing = api.get_active_pending_action()
+    if existing and existing.get("action_type") == "budget_planning":
+        if reason:
+            messenger.send_message(reason)
+        _go_to_step(
+            api,
+            messenger,
+            existing["id"],
+            existing.get("context", {}),
+            existing.get("current_step") or 1,
+        )
+        return existing
+
+    action = api.create_pending_action(
+        action_type="budget_planning",
+        total_steps=8,
+        context={},
+    )
+    if reason:
+        messenger.send_message(reason)
+    _go_to_step(api, messenger, action["id"], {}, 1)
+    return action
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # ROUTER DE CALLBACKS Y MENSAJES — punto de entrada desde el webhook
 # ══════════════════════════════════════════════════════════════════════════════

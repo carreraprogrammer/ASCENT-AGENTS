@@ -87,6 +87,16 @@ class RailsApiPort(ABC):
         ...
 
     @abstractmethod
+    def get_completeness(self, month: int, year: int) -> dict:
+        """GET /api/v1/completeness?month=&year="""
+        ...
+
+    @abstractmethod
+    def preflight_agent(self, *, intent: str, month: int, year: int) -> dict:
+        """POST /api/v1/agents/preflight"""
+        ...
+
+    @abstractmethod
     def get_debts(self) -> list[dict]:
         """GET /api/v1/debts"""
         ...
