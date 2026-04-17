@@ -13,9 +13,9 @@ TG_BASE   = f"https://api.telegram.org/bot{BOT_TOKEN}"
 
 COMMANDS = [
     {"command": "resumen",     "description": "Resumen del mes con burn rate y alertas"},
-    {"command": "presupuesto", "description": "Cómo vas categoría por categoría"},
-    {"command": "deudas",      "description": "Estado de tus deudas y estrategia de pago"},
     {"command": "balance",     "description": "Saldo disponible ahora mismo"},
+    {"command": "plan",        "description": "Ver o armar el plan mensual"},
+    {"command": "ingresos",    "description": "Registrar o revisar fuentes de ingreso"},
 ]
 
 resp = httpx.post(f"{TG_BASE}/setMyCommands", json={"commands": COMMANDS})

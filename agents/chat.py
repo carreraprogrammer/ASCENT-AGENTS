@@ -84,6 +84,12 @@ def handle_command(api: RailsApiPort, messenger: MessengerPort, parsed: ParsedUp
         messenger.send_message(f"❓ No conozco el comando <code>/{command}</code>.\n\n{HELP_TEXT}")
         return
 
+    # Comandos que disparan un wizard directamente
+    if COMMAND_PROMPTS[command] == "__income_wizard__":
+        from flows import income_wizard
+        income_wizard.trigger(api, messenger)
+        return
+
     try:
         initial_message = _apply_preflight(
             api,

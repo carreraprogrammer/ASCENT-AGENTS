@@ -50,16 +50,15 @@ COMMAND_PROMPTS = {
         "Necesito un resumen ejecutivo de mi situación financiera de este mes. "
         "Consultá el summary y devolveme solo lo importante, incluyendo plan mensual y overflow si ya existe."
     ),
-    "presupuesto": (
-        "Mostrame cómo voy con mis presupuestos este mes, categoría por categoría, "
-        "con alertas claras si voy mal. Si hay overflow, aclara que no debe inflar el presupuesto base."
-    ),
-    "deudas": (
-        "Resumime el estado actual de mis deudas, saldos, cuotas y estrategia."
-    ),
     "balance": (
         "Decime cuánto tengo disponible ahora mismo con ingresos y gastos reales."
     ),
+    "plan": (
+        "Mostrame cómo voy con mis presupuestos este mes, categoría por categoría, "
+        "con alertas claras si voy mal. Si hay overflow, aclará que no debe inflar el presupuesto base. "
+        "Si no hay plan confirmado, mencionalo y ofrecé armarlo."
+    ),
+    "ingresos": "__income_wizard__",
 }
 
 HELP_TEXT = """\
