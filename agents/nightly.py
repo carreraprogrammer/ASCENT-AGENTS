@@ -360,7 +360,7 @@ TOOLS = [
                 "product":          {"type": "string", "enum": ["nequi", "tc0004", "tc0002", "debito", "bre-b"]},
                 "amount":           {"type": "integer"},
                 "transaction_type": {"type": "string", "enum": ["expense", "income"]},
-                "status":           {"type": "string", "enum": ["confirmed", "pending", "projected"]},
+                "status":           {"type": "string", "enum": ["confirmed", "pending"]},
                 "subcategory_code": {
                     "type": "string",
                     "enum": [
@@ -385,7 +385,7 @@ TOOLS = [
             "properties": {
                 "id":               {"type": "string"},
                 "concept":          {"type": "string"},
-                "status":           {"type": "string", "enum": ["confirmed", "pending", "projected"]},
+                "status":           {"type": "string", "enum": ["confirmed", "pending"]},
                 "subcategory_code": {"type": "string"},
                 "amount":           {"type": "integer"},
             },
