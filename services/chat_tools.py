@@ -234,6 +234,64 @@ def build_tools() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "navigate_to",
+            "description": (
+                "Navega al usuario web a una página específica de la aplicación. "
+                "Úsalo al final de un flujo para llevar al usuario al resultado. "
+                "Ejemplos: /budgets tras confirmar el plan, /debts tras registrar una deuda. "
+                "Solo disponible en modo web."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "route": {
+                        "type": "string",
+                        "description": "Ruta destino. Ej: /budgets, /debts, /dashboard, /recurring",
+                    },
+                },
+                "required": ["route"],
+            },
+        },
+        {
+            "name": "emit_ui_event",
+            "description": (
+                "Emite un evento estructurado al front-end web (PWA). "
+                "El front hace polling y renderiza el componente correspondiente al event_type. "
+                "Úsalo para proponer un plan, mostrar una tarjeta informativa, "
+                "solicitar confirmación o abrir un formulario dinámico. "
+                "NO lo uses en flujos puramente de Telegram."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "event_type": {
+                        "type": "string",
+                        "enum": [
+                            "show_plan_proposal",
+                            "show_card",
+                            "show_form",
+                            "request_confirmation",
+                        ],
+                    },
+                    "payload": {
+                        "type": "object",
+                        "description": (
+                            "Datos del evento. "
+                            "show_plan_proposal: { draft: MonthlyPlanDraft, warnings: string[] }. "
+                            "show_card: { title, body, tone: info|warning|success }. "
+                            "show_form: { fields: DynamicField[], prefilled: object }. "
+                            "request_confirmation: { question, context }."
+                        ),
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "description": "Identificador de sesión opcional para filtrar eventos en el front.",
+                    },
+                },
+                "required": ["event_type", "payload"],
+            },
+        },
+        {
             "name": "send_telegram",
             "description": (
                 "Envía la respuesta final. Soporta inline_keyboard. "
@@ -395,6 +453,26 @@ def build_tool_map(
         financial_context_wizard.trigger(api, messenger)
         return {"ok": True, "message": "Wizard iniciado en Telegram."}
 
+    def _navigate_to(input_data: dict) -> dict:
+        return _emit_ui_event({"event_type": "navigate", "payload": {"route": input_data["route"]}})
+
+    def _emit_ui_event(input_data: dict) -> dict:
+        body = {
+            "event_type": input_data["event_type"],
+            "payload": input_data.get("payload", {}),
+        }
+        if input_data.get("session_id"):
+            body["session_id"] = input_data["session_id"]
+
+        response = httpx.post(
+            f"{API_URL}/api/v1/agent_events",
+            headers=build_auth_headers(),
+            json=body,
+            timeout=15,
+        )
+        response.raise_for_status()
+        return response.json().get("data", {})
+
     return {
         "get_summary": lambda p: api.get_summary(p.get("month", month), p.get("year", year)),
         "get_transactions": lambda p: api.get_transactions(p.get("month", month), p.get("year", year)),
@@ -411,6 +489,8 @@ def build_tool_map(
         "delete_transaction": lambda p: _delete(f"/api/v1/transactions/{p['id']}"),
         "update_financial_context": lambda p: api.update_financial_context(**p),
         "trigger_financial_context_wizard": _trigger_fc_wizard,
+        "navigate_to": _navigate_to,
+        "emit_ui_event": _emit_ui_event,
         "update_debt": lambda p: _patch(f"/api/v1/debts/{p.pop('id')}", p),
         "delete_debt": lambda p: _delete(f"/api/v1/debts/{p['id']}"),
         "create_recurring_obligation": lambda p: _post("/api/v1/recurring_obligations", p),

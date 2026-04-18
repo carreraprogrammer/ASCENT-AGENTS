@@ -33,6 +33,22 @@ class ParsedUpdate:
     raw: dict                 = field(default_factory=dict)
 
 
+class NullMessenger:
+    """Messenger vacío para el canal web — el agente no envía mensajes de texto."""
+
+    def parse_update(self, update: dict) -> "ParsedUpdate":
+        return ParsedUpdate(intent="")
+
+    def send_message(self, text: str, parse_mode: str = "HTML") -> None:
+        pass
+
+    def send_with_buttons(self, text: str, buttons: list, parse_mode: str = "HTML") -> None:
+        pass
+
+    def answer_callback(self, callback_query_id: str, text: str, show_alert: bool = False) -> None:
+        pass
+
+
 class MessengerPort(ABC):
 
     @abstractmethod
