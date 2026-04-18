@@ -17,10 +17,9 @@ La API ahora puede devolver `income_sources` con:
 
 En esta fase el Brain:
 
-- sigue aceptando el contrato legacy para crear ingresos simples
-- ya puede leer y mostrar `schedules` cuando existen
-
-No se reescribió por completo `income_wizard.py`; se mantuvo compatibilidad para no mezclar dos migraciones al mismo tiempo.
+- ya lee `schedules`
+- ya crea `income_sources` con `cadence + schedules`
+- dejó de depender del wizard legacy de un solo rango
 
 ## Impacto concreto
 
@@ -35,19 +34,24 @@ No se reescribió por completo `income_wizard.py`; se mantuvo compatibilidad par
 - aceptan `schedules`
 - aceptan `notes`
 
+`income_wizard.py` ahora:
+
+- pregunta cadencia explícita
+- soporta mensual / quincenal / semanal / irregular
+- crea una sola fuente por ingreso, aunque tenga varias ventanas
+- pide confiabilidad solo para el ingreso variable
+
 ## Estado
 
 - lectura del modelo nuevo: sí
-- escritura avanzada desde Brain: compatible, pero todavía no explotada por el wizard legacy
+- escritura del modelo nuevo desde el Brain: sí
 
-## Siguiente paso opcional
+## Deuda restante
 
-Si luego se quiere endurecer el flujo conversacional de ingresos, `income_wizard.py` debería pasar de:
+El Brain sigue conviviendo con campos agregados legacy (`expected_day_from`, `expected_day_to`, `expected_amount`) porque el API todavía los usa como denormalización de lectura.
 
-- pedir un único rango
+Eso ya no bloquea:
 
-a:
-
-- construir un `income_source` con `schedules`
-
-Pero eso ya no bloquea planificación mensual ni UI.
+- perfil de ingresos
+- budget wizard
+- monthly planning

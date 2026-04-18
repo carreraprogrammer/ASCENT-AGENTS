@@ -1,19 +1,12 @@
 """
-flows/income_wizard.py — Wizard de registro de ingresos.
+flows/income_wizard.py — Wizard conversacional del perfil de ingresos.
 
-Se activa cuando:
-  a) El agente de presupuesto detecta que no hay fuentes de ingreso
-  b) El usuario pide explícitamente registrar sus ingresos
-  c) El preflight detecta intent=income_setup
+Objetivo:
+- capturar el ingreso base confiable
+- capturar opcionalmente un ingreso variable
+- construir income_sources con cadence + schedules
 
-Flujo (4–5 steps):
-  1. Pedir nombre del ingreso base (texto libre)
-  2. Pedir monto del ingreso base (texto libre)
-  3. Pedir rango de días (botones)
-  4. ¿Hay ingresos variables? (botones)
-  [5. Si sí: nombre + monto del variable]
-  [6. Si sí: confiabilidad del variable (botones)]
-  → Guarda via POST /api/v1/income_sources y confirma
+No duplica fuentes para modelar quincenal/semanal.
 """
 
 from __future__ import annotations
@@ -26,19 +19,22 @@ from ports.messenger import MessengerPort
 
 logger = logging.getLogger(__name__)
 
-DAY_RANGES = [
-    ("1 al 5",   1,  5),
-    ("6 al 10",  6, 10),
-    ("11 al 15", 11, 15),
-    ("16 al 20", 16, 20),
-    ("21 al 25", 21, 25),
-    ("26 al 31", 26, 31),
+MONTHLY_WINDOWS = [
+    ("Inicio de mes (1-5)", "early", 1, 5),
+    ("Primera semana (1-7)", "week1", 1, 7),
+    ("Primera quincena (1-15)", "q1", 1, 15),
+    ("Mediados (10-20)", "mid", 10, 20),
+    ("Segunda quincena (15-31)", "q2", 15, 31),
+    ("Fin de mes (25-31)", "late", 25, 31),
 ]
 
+DAY_OPTIONS = [1, 5, 10, 15, 20, 25, 30]
+
 RELIABILITY_OPTIONS = [
-    ("25% — muy incierto",         25),
+    ("25% — muy incierto", 25),
     ("50% — la mitad de los meses", 50),
-    ("75% — casi siempre llega",   75),
+    ("75% — casi siempre llega", 75),
+    ("100% — prácticamente fijo", 100),
 ]
 
 
@@ -47,22 +43,115 @@ def _fmt_cop(n: int) -> str:
 
 
 def _parse_monto(text: str) -> int | None:
-    text = text.strip().lower().replace("$", "").replace(".", "").replace(",", "")
+    normalized = text.strip().lower().replace("$", "").replace(".", "").replace(",", "")
     try:
-        if text.endswith("m"):
-            return int(float(text[:-1]) * 1_000_000)
-        if text.endswith("k"):
-            return int(float(text[:-1]) * 1_000)
-        val = int(float(re.sub(r"[^\d.]", "", text) or "0"))
-        return val if val > 0 else None
+        if normalized.endswith("m"):
+            return int(float(normalized[:-1]) * 1_000_000)
+        if normalized.endswith("k"):
+            return int(float(normalized[:-1]) * 1_000)
+        value = int(float(re.sub(r"[^\d.]", "", normalized) or "0"))
+        return value if value > 0 else None
     except (ValueError, AttributeError):
         return None
 
 
-# ── Trigger ───────────────────────────────────────────────────────────────────
+def _day_window(day: int) -> tuple[int, int]:
+    return max(1, day - 2), min(31, day + 2)
+
+
+def _build_schedules(cadence: str, *, amount: int, window_key: str | None = None, day_1: int | None = None, day_2: int | None = None) -> list[dict]:
+    if cadence == "biweekly":
+        first = day_1 or 5
+        second = day_2 or 20
+        day_from_1, day_to_1 = _day_window(first)
+        day_from_2, day_to_2 = _day_window(second)
+        first_amount = round(amount / 2)
+        return [
+            {
+                "ordinal": 1,
+                "label": "Quincena 1",
+                "expected_day_from": day_from_1,
+                "expected_day_to": day_to_1,
+                "expected_amount": first_amount,
+            },
+            {
+                "ordinal": 2,
+                "label": "Quincena 2",
+                "expected_day_from": day_from_2,
+                "expected_day_to": day_to_2,
+                "expected_amount": amount - first_amount,
+            },
+        ]
+
+    if cadence == "weekly":
+        weekly_windows = [
+            ("Semana 1", 1, 7),
+            ("Semana 2", 8, 14),
+            ("Semana 3", 15, 21),
+            ("Semana 4", 22, 31),
+        ]
+        base_amount = amount // len(weekly_windows)
+        remainder = amount - (base_amount * len(weekly_windows))
+        schedules: list[dict] = []
+        for index, (label, day_from, day_to) in enumerate(weekly_windows, start=1):
+            schedules.append(
+                {
+                    "ordinal": index,
+                    "label": label,
+                    "expected_day_from": day_from,
+                    "expected_day_to": day_to,
+                    "expected_amount": base_amount + (remainder if index == len(weekly_windows) else 0),
+                }
+            )
+            remainder = 0
+        return schedules
+
+    if cadence == "monthly":
+        selected = next((item for item in MONTHLY_WINDOWS if item[1] == window_key), MONTHLY_WINDOWS[3])
+        return [
+            {
+                "ordinal": 1,
+                "label": selected[0],
+                "expected_day_from": selected[2],
+                "expected_day_to": selected[3],
+                "expected_amount": amount,
+            }
+        ]
+
+    return [
+        {
+            "ordinal": 1,
+            "label": "Mes completo",
+            "expected_day_from": 1,
+            "expected_day_to": 31,
+            "expected_amount": amount,
+        }
+    ]
+
+
+def _summary_range(schedules: list[dict]) -> tuple[int, int]:
+    return (
+        min(int(schedule["expected_day_from"]) for schedule in schedules),
+        max(int(schedule["expected_day_to"]) for schedule in schedules),
+    )
+
+
+def _profile_summary(name: str, amount: int, cadence: str, schedules: list[dict], reliability: int | None = None) -> str:
+    lines = [
+        f"<b>{name}</b> — {_fmt_cop(amount)}",
+        f"Cadencia: <b>{cadence}</b>",
+    ]
+    if reliability is not None:
+        lines.append(f"Confiabilidad: <b>{reliability}%</b>")
+    lines.append("Ventanas:")
+    lines.extend(
+        f"• {schedule['label']}: {schedule['expected_day_from']}-{schedule['expected_day_to']} por {_fmt_cop(int(schedule['expected_amount']))}"
+        for schedule in schedules
+    )
+    return "\n".join(lines)
+
 
 def trigger(api: RailsApiPort, messenger: MessengerPort, reason: str | None = None) -> dict | None:
-    """Lanza el wizard creando un PendingAction."""
     existing = api.get_active_pending_action()
     if existing and existing.get("action_type") == "income_setup":
         if reason:
@@ -72,7 +161,7 @@ def trigger(api: RailsApiPort, messenger: MessengerPort, reason: str | None = No
 
     action = api.create_pending_action(
         action_type="income_setup",
-        total_steps=5,
+        total_steps=10,
         context={},
     )
     if reason:
@@ -80,8 +169,6 @@ def trigger(api: RailsApiPort, messenger: MessengerPort, reason: str | None = No
     _go_to_step(api, messenger, action["id"], {}, 1)
     return action
 
-
-# ── Router de callbacks y mensajes ────────────────────────────────────────────
 
 def handle_update(
     api: RailsApiPort,
@@ -91,19 +178,17 @@ def handle_update(
     payload: dict,
     callback_query_id: str | None = None,
 ) -> None:
-    step  = pending_action.get("current_step", 1)
-    ctx   = pending_action.get("context") or {}
+    step = pending_action.get("current_step", 1)
+    ctx = pending_action.get("context") or {}
     pa_id = pending_action["id"]
 
     if callback_query_id:
         messenger.answer_callback(callback_query_id, "✅")
 
     if update_type == "callback_query":
-        data = payload.get("data", "")
-        _handle_callback(api, messenger, pa_id, step, ctx, data)
+        _handle_callback(api, messenger, pa_id, step, ctx, payload.get("data", ""))
     elif update_type == "message":
-        text = payload.get("text", "").strip()
-        _handle_message(api, messenger, pa_id, step, ctx, text)
+        _handle_message(api, messenger, pa_id, step, ctx, payload.get("text", "").strip())
 
 
 def _handle_callback(
@@ -119,33 +204,65 @@ def _handle_callback(
 
     _, key = data.split(":", 1)
 
-    # Step 3: day range selected
-    if key.startswith("day:"):
-        _, day_from, day_to = key.split(":")
-        ctx["base_day_from"] = int(day_from)
-        ctx["base_day_to"]   = int(day_to)
-        _go_to_step(api, messenger, pa_id, ctx, 4)
+    if key.startswith("base_cadence:"):
+        cadence = key.split(":")[1]
+        ctx["base_cadence"] = cadence
+        next_step = _next_schedule_step("base", cadence)
+        _go_to_step(api, messenger, pa_id, ctx, next_step)
         return
 
-    # Step 4: variable income?
-    if key == "var:yes":
+    if key.startswith("var_cadence:"):
+        cadence = key.split(":")[1]
+        ctx["var_cadence"] = cadence
+        next_step = _next_schedule_step("var", cadence)
+        _go_to_step(api, messenger, pa_id, ctx, next_step)
+        return
+
+    if key.startswith("base_window:"):
+        ctx["base_window_key"] = key.split(":")[1]
         _go_to_step(api, messenger, pa_id, ctx, 5)
         return
 
+    if key.startswith("var_window:"):
+        ctx["var_window_key"] = key.split(":")[1]
+        _go_to_step(api, messenger, pa_id, ctx, 10)
+        return
+
+    if key.startswith("base_day1:"):
+        ctx["base_day_1"] = int(key.split(":")[1])
+        _go_to_step(api, messenger, pa_id, ctx, 5)
+        return
+
+    if key.startswith("base_day2:"):
+        ctx["base_day_2"] = int(key.split(":")[1])
+        _go_to_step(api, messenger, pa_id, ctx, 5)
+        return
+
+    if key.startswith("var_day1:"):
+        ctx["var_day_1"] = int(key.split(":")[1])
+        _go_to_step(api, messenger, pa_id, ctx, 10)
+        return
+
+    if key.startswith("var_day2:"):
+        ctx["var_day_2"] = int(key.split(":")[1])
+        _go_to_step(api, messenger, pa_id, ctx, 10)
+        return
+
+    if key == "var:yes":
+        _go_to_step(api, messenger, pa_id, ctx, 6)
+        return
+
     if key == "var:no":
-        _save_base_income(api, messenger, pa_id, ctx)
+        _save_profiles(api, messenger, pa_id, ctx, include_variable=False)
         return
 
-    # Step 6: reliability
     if key.startswith("rel:"):
-        reliability = int(key.split(":")[1])
-        ctx["var_reliability"] = reliability
-        _save_all(api, messenger, pa_id, ctx)
+        ctx["var_reliability"] = int(key.split(":")[1])
+        _save_profiles(api, messenger, pa_id, ctx, include_variable=True)
         return
 
-    # Step 6b: skip variable
     if key == "var:skip":
-        _save_base_income(api, messenger, pa_id, ctx)
+        _save_profiles(api, messenger, pa_id, ctx, include_variable=False)
         return
 
     logger.warning("[income_wizard] callback no reconocido: %s", data)
@@ -162,169 +279,242 @@ def _handle_message(
     if step == 1:
         ctx["base_name"] = text
         _go_to_step(api, messenger, pa_id, ctx, 2)
+        return
 
-    elif step == 2:
-        monto = _parse_monto(text)
-        if monto:
-            ctx["base_amount"] = monto
+    if step == 2:
+        amount = _parse_monto(text)
+        if amount:
+            ctx["base_amount"] = amount
             _go_to_step(api, messenger, pa_id, ctx, 3)
         else:
-            messenger.send_message("No entendí el monto. Escribilo como <code>6400000</code> o <code>6.4M</code>.")
+            messenger.send_message("No entendí el monto. Escríbelo como <code>6400000</code> o <code>6.4M</code>.")
+        return
 
-    elif step == 5:
-        # Variable name
-        if not ctx.get("var_name"):
-            ctx["var_name"] = text
-            api.update_pending_action(pa_id, context=ctx)
-            messenger.send_message(f"Y cuando llega, ¿cuánto es aproximadamente? Escribí el monto.")
+    if step == 6:
+        ctx["var_name"] = text
+        _go_to_step(api, messenger, pa_id, ctx, 7)
+        return
+
+    if step == 7:
+        amount = _parse_monto(text)
+        if amount:
+            ctx["var_amount"] = amount
+            _go_to_step(api, messenger, pa_id, ctx, 8)
         else:
-            # Variable amount
-            monto = _parse_monto(text)
-            if monto:
-                ctx["var_amount"] = monto
-                _go_to_step(api, messenger, pa_id, ctx, 6)
-            else:
-                messenger.send_message("No entendí el monto. Escribilo como <code>1500000</code> o <code>1.5M</code>.")
+            messenger.send_message("No entendí el monto. Escríbelo como <code>2900000</code> o <code>2.9M</code>.")
+        return
 
-    else:
-        messenger.send_message("Usá los botones para avanzar.")
+    messenger.send_message("Usá los botones o responde el dato solicitado para avanzar.")
 
 
-# ── Steps ─────────────────────────────────────────────────────────────────────
+def _next_schedule_step(prefix: str, cadence: str) -> int:
+    if prefix == "base":
+        if cadence == "monthly":
+            return 4
+        if cadence == "biweekly":
+            return 4
+        return 5
 
-def _go_to_step(
-    api: RailsApiPort,
-    messenger: MessengerPort,
-    pa_id: int | str,
-    ctx: dict,
-    step: int,
-) -> None:
+    if cadence == "monthly":
+        return 9
+    if cadence == "biweekly":
+        return 9
+    return 10
+
+
+def _go_to_step(api: RailsApiPort, messenger: MessengerPort, pa_id: int | str, ctx: dict, step: int) -> None:
     api.update_pending_action(pa_id, current_step=step, context=ctx)
 
     if step == 1:
         messenger.send_message(
-            "Vamos a registrar tus ingresos para que el sistema pueda calcular tu presupuesto real.\n\n"
-            "Primero, <b>¿cómo se llama tu ingreso más seguro?</b>\n"
-            "El que siempre llega — por ejemplo: <i>Salario Acme</i>"
+            "Vamos a registrar tus ingresos para calcular el presupuesto real.\n\n"
+            "<b>¿Cómo se llama tu ingreso más seguro?</b>\n"
+            "Ejemplo: <i>Salario Acme</i>"
         )
+        return
 
-    elif step == 2:
-        name = ctx.get("base_name", "tu ingreso")
+    if step == 2:
         messenger.send_message(
-            f"Perfecto. ¿Cuánto recibís de <b>{name}</b> cada mes?\n"
-            "Escribí el monto, por ejemplo: <code>6400000</code> o <code>6.4M</code>"
+            f"Perfecto. ¿Cuánto recibís de <b>{ctx.get('base_name', 'ese ingreso')}</b> en total al mes?\n"
+            "Ejemplo: <code>6400000</code> o <code>6.4M</code>"
         )
+        return
 
-    elif step == 3:
-        name = ctx.get("base_name", "este ingreso")
-        amount = ctx.get("base_amount", 0)
+    if step == 3:
         messenger.send_with_buttons(
             text=(
-                f"<b>{name}</b> — {_fmt_cop(amount)}\n\n"
-                "¿En qué rango de días del mes suele llegar?"
+                f"<b>{ctx.get('base_name', 'Ingreso base')}</b> — {_fmt_cop(int(ctx.get('base_amount', 0) or 0))}\n\n"
+                "¿Cada cuánto llega?"
             ),
             buttons=[
-                [{"text": label, "callback_data": f"wi:day:{df}:{dt}"}]
-                for label, df, dt in DAY_RANGES
+                [{"text": "Mensual", "callback_data": "wi:base_cadence:monthly"}],
+                [{"text": "Quincenal", "callback_data": "wi:base_cadence:biweekly"}],
+                [{"text": "Semanal", "callback_data": "wi:base_cadence:weekly"}],
+                [{"text": "Irregular", "callback_data": "wi:base_cadence:irregular"}],
             ],
         )
+        return
 
-    elif step == 4:
+    if step == 4:
+        if ctx.get("base_cadence") == "monthly":
+            messenger.send_with_buttons(
+                text="¿En qué parte del mes suele llegar ese ingreso base?",
+                buttons=[[{"text": label, "callback_data": f"wi:base_window:{key}"}] for label, key, _, _ in MONTHLY_WINDOWS],
+            )
+            return
+
         messenger.send_with_buttons(
-            text="¿Tenés algún <b>ingreso variable</b> además? (freelance, comisiones, arriendo recibido, etc.)",
+            text="Seleccioná el <b>primer día de pago</b> aproximado de ese ingreso quincenal.",
+            buttons=[[{"text": f"Día {day}", "callback_data": f"wi:base_day1:{day}"}] for day in DAY_OPTIONS],
+        )
+        return
+
+    if step == 5:
+        if ctx.get("base_cadence") == "biweekly" and not ctx.get("base_day_2"):
+            messenger.send_with_buttons(
+                text="Seleccioná el <b>segundo día de pago</b> aproximado.",
+                buttons=[[{"text": f"Día {day}", "callback_data": f"wi:base_day2:{day}"}] for day in DAY_OPTIONS],
+            )
+            return
+
+        messenger.send_with_buttons(
+            text="¿Tenés además algún <b>ingreso variable o extra</b>?",
             buttons=[
                 [{"text": "Sí, agregar uno", "callback_data": "wi:var:yes"}],
-                [{"text": "No, solo ese",    "callback_data": "wi:var:no"}],
+                [{"text": "No, solo ese", "callback_data": "wi:var:no"}],
             ],
         )
+        return
 
-    elif step == 5:
+    if step == 6:
         messenger.send_message(
             "¿Cómo se llama ese ingreso variable?\n"
-            "Por ejemplo: <i>Freelance Globex</i>, <i>Comisión ventas</i>"
+            "Ejemplo: <i>Freelance Globex</i>"
         )
+        return
 
-    elif step == 6:
-        var_name   = ctx.get("var_name", "tu ingreso variable")
-        var_amount = ctx.get("var_amount", 0)
+    if step == 7:
+        messenger.send_message(
+            f"¿Cuánto es <b>{ctx.get('var_name', 'ese ingreso variable')}</b> cuando llega?\n"
+            "Ejemplo: <code>2900000</code> o <code>2.9M</code>"
+        )
+        return
+
+    if step == 8:
         messenger.send_with_buttons(
             text=(
-                f"<b>{var_name}</b> — {_fmt_cop(var_amount)}\n\n"
-                "¿Qué tan seguido llega este ingreso?"
+                f"<b>{ctx.get('var_name', 'Ingreso variable')}</b> — {_fmt_cop(int(ctx.get('var_amount', 0) or 0))}\n\n"
+                "¿Cada cuánto llega?"
             ),
+            buttons=[
+                [{"text": "Mensual", "callback_data": "wi:var_cadence:monthly"}],
+                [{"text": "Quincenal", "callback_data": "wi:var_cadence:biweekly"}],
+                [{"text": "Semanal", "callback_data": "wi:var_cadence:weekly"}],
+                [{"text": "Irregular", "callback_data": "wi:var_cadence:irregular"}],
+            ],
+        )
+        return
+
+    if step == 9:
+        if ctx.get("var_cadence") == "monthly":
+            messenger.send_with_buttons(
+                text="¿En qué parte del mes suele llegar ese ingreso variable?",
+                buttons=[[{"text": label, "callback_data": f"wi:var_window:{key}"}] for label, key, _, _ in MONTHLY_WINDOWS],
+            )
+            return
+
+        messenger.send_with_buttons(
+            text="Seleccioná el <b>primer día</b> aproximado de llegada para ese ingreso variable.",
+            buttons=[[{"text": f"Día {day}", "callback_data": f"wi:var_day1:{day}"}] for day in DAY_OPTIONS],
+        )
+        return
+
+    if step == 10:
+        if ctx.get("var_cadence") == "biweekly" and not ctx.get("var_day_2"):
+            messenger.send_with_buttons(
+                text="Seleccioná el <b>segundo día</b> aproximado de llegada.",
+                buttons=[[{"text": f"Día {day}", "callback_data": f"wi:var_day2:{day}"}] for day in DAY_OPTIONS],
+            )
+            return
+
+        messenger.send_with_buttons(
+            text="¿Qué tan seguido llega ese ingreso variable?",
             buttons=[
                 [{"text": label, "callback_data": f"wi:rel:{pct}"}]
                 for label, pct in RELIABILITY_OPTIONS
             ] + [[{"text": "Mejor lo omito", "callback_data": "wi:var:skip"}]],
         )
+        return
 
-    else:
-        logger.error("[income_wizard] step desconocido: %d", step)
+    logger.error("[income_wizard] step desconocido: %d", step)
 
 
-# ── Persistencia ──────────────────────────────────────────────────────────────
+def _build_payload(prefix: str, ctx: dict, classification: str, reliability: int) -> dict:
+    amount = int(ctx[f"{prefix}_amount"])
+    cadence = ctx[f"{prefix}_cadence"]
+    schedules = _build_schedules(
+        cadence,
+        amount=amount,
+        window_key=ctx.get(f"{prefix}_window_key"),
+        day_1=ctx.get(f"{prefix}_day_1"),
+        day_2=ctx.get(f"{prefix}_day_2"),
+    )
+    day_from, day_to = _summary_range(schedules)
+    return {
+        "name": ctx[f"{prefix}_name"],
+        "expected_amount": amount,
+        "expected_day_from": day_from,
+        "expected_day_to": day_to,
+        "classification": classification,
+        "cadence": cadence,
+        "reliability_score": reliability,
+        "schedules": schedules,
+        "is_variable": classification != "base",
+    }
 
-def _save_base_income(
-    api: RailsApiPort,
-    messenger: MessengerPort,
-    pa_id: int | str,
-    ctx: dict,
-) -> None:
+
+def _save_profiles(api: RailsApiPort, messenger: MessengerPort, pa_id: int | str, ctx: dict, *, include_variable: bool) -> None:
     try:
-        api.create_income_source(
-            name=ctx["base_name"],
-            expected_amount=ctx["base_amount"],
-            expected_day_from=ctx["base_day_from"],
-            expected_day_to=ctx["base_day_to"],
-            classification="base",
-            reliability_score=100,
-            is_variable=False,
-        )
-        api.update_pending_action(pa_id, status="completed")
-        messenger.send_message(
-            f"✅ <b>Ingreso base guardado</b>: {ctx['base_name']} — {_fmt_cop(ctx['base_amount'])}\n\n"
-            "El sistema ya puede calcular tu presupuesto real. "
-            "Cuando quieras agregar más ingresos o ajustar este, escribí <code>mis ingresos</code>."
-        )
-    except Exception as e:
-        logger.error("[income_wizard] error guardando ingreso base: %s", e)
-        messenger.send_message(f"❌ Error al guardar: {e}. Intentá de nuevo.")
+        base_payload = _build_payload("base", ctx, "base", 100)
+        api.create_income_source(**base_payload)
 
+        response_lines = [
+            "✅ <b>Perfil de ingresos guardado</b>",
+            "",
+            _profile_summary(
+                base_payload["name"],
+                int(base_payload["expected_amount"]),
+                str(base_payload["cadence"]),
+                list(base_payload["schedules"]),
+            ),
+        ]
 
-def _save_all(
-    api: RailsApiPort,
-    messenger: MessengerPort,
-    pa_id: int | str,
-    ctx: dict,
-) -> None:
-    try:
-        api.create_income_source(
-            name=ctx["base_name"],
-            expected_amount=ctx["base_amount"],
-            expected_day_from=ctx["base_day_from"],
-            expected_day_to=ctx["base_day_to"],
-            classification="base",
-            reliability_score=100,
-            is_variable=False,
-        )
-        api.create_income_source(
-            name=ctx["var_name"],
-            expected_amount=ctx["var_amount"],
-            expected_day_from=ctx.get("base_day_from", 1),
-            expected_day_to=ctx.get("base_day_to", 31),
-            classification="variable",
-            reliability_score=ctx.get("var_reliability", 50),
-            is_variable=True,
-        )
+        if include_variable and ctx.get("var_name") and ctx.get("var_amount") and ctx.get("var_cadence"):
+            reliability = int(ctx.get("var_reliability", 50))
+            variable_payload = _build_payload("var", ctx, "variable", reliability)
+            api.create_income_source(**variable_payload)
+            response_lines.extend(
+                [
+                    "",
+                    _profile_summary(
+                        variable_payload["name"],
+                        int(variable_payload["expected_amount"]),
+                        str(variable_payload["cadence"]),
+                        list(variable_payload["schedules"]),
+                        reliability,
+                    ),
+                ]
+            )
+
         api.update_pending_action(pa_id, status="completed")
-        messenger.send_message(
-            f"✅ <b>Ingresos guardados</b>\n\n"
-            f"• Base: {ctx['base_name']} — {_fmt_cop(ctx['base_amount'])}\n"
-            f"• Variable: {ctx['var_name']} — {_fmt_cop(ctx['var_amount'])} "
-            f"({ctx.get('var_reliability', 50)}% de confiabilidad)\n\n"
-            "El sistema ya puede calcular tu presupuesto real. "
-            "Para el plan del mes escribí <code>presupuesto</code>."
+        response_lines.extend(
+            [
+                "",
+                "El sistema ya puede calcular tu presupuesto mensual real.",
+                "Cuando quieras ajustar esto, escríbeme <code>mis ingresos</code>.",
+            ]
         )
+        messenger.send_message("\n".join(response_lines))
     except Exception as e:
         logger.error("[income_wizard] error guardando ingresos: %s", e)
-        messenger.send_message(f"❌ Error al guardar: {e}. Intentá de nuevo.")
+        messenger.send_message(f"❌ Error al guardar el perfil de ingresos: {e}. Inténtalo de nuevo.")
