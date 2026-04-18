@@ -190,7 +190,10 @@ class RailsHttpAdapter(RailsApiPort):
         expected_day_from: int,
         expected_day_to: int,
         classification: str = "base",
+        cadence: str = "monthly",
         reliability_score: int = 100,
+        schedules: list[dict] | None = None,
+        notes: str | None = None,
         is_variable: bool = False,
     ) -> dict:
         payload = {
@@ -199,9 +202,14 @@ class RailsHttpAdapter(RailsApiPort):
             "expected_day_from": expected_day_from,
             "expected_day_to": expected_day_to,
             "classification": classification,
+            "cadence": cadence,
             "reliability_score": reliability_score,
             "is_variable": is_variable,
         }
+        if schedules is not None:
+            payload["schedules"] = schedules
+        if notes:
+            payload["notes"] = notes
         result = self._post("/api/v1/income_sources", payload)
         return result.get("data", result) if isinstance(result, dict) else result
 

@@ -120,7 +120,10 @@ class RailsApiPort(ABC):
         expected_day_from: int,
         expected_day_to: int,
         classification: str = "base",
+        cadence: str = "monthly",
         reliability_score: int = 100,
+        schedules: list[dict[str, Any]] | None = None,
+        notes: str | None = None,
         is_variable: bool = False,
     ) -> dict:
         """POST /api/v1/income_sources"""

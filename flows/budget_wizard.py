@@ -376,6 +376,16 @@ def _source_classification(source: dict) -> str:
     return "variable" if source.get("is_variable") else "base"
 
 
+def _source_schedule_label(source: dict) -> str:
+    schedules = source.get("schedules") or []
+    if schedules:
+        return " · ".join(
+            f"{schedule.get('label', 'Ventana')} {schedule.get('expected_day_from')}-{schedule.get('expected_day_to')}"
+            for schedule in schedules
+        )
+    return f"{source.get('expected_day_from')}-{source.get('expected_day_to')}"
+
+
 def _income_breakdown(api: RailsApiPort) -> tuple[list[dict], list[dict]]:
     sources = _active_income_sources(api)
     base = [source for source in sources if _source_classification(source) == "base"]
@@ -474,7 +484,7 @@ def _send_step_1(api: RailsApiPort, messenger: MessengerPort, ctx: dict) -> None
     if base_sources:
         lines.append("Ingreso base confiable:")
         lines.extend(
-            f"• {source['name']} ({source['expected_day_from']}-{source['expected_day_to']}): "
+            f"• {source['name']} ({_source_schedule_label(source)}): "
             f"<b>{_fmt_cop(int(source.get('expected_amount', 0) or 0))}</b>"
             for source in base_sources
         )
@@ -482,7 +492,7 @@ def _send_step_1(api: RailsApiPort, messenger: MessengerPort, ctx: dict) -> None
         lines.append("")
         lines.append("Ingresos variables / extra:")
         lines.extend(
-            f"• {source['name']} ({source['expected_day_from']}-{source['expected_day_to']}): "
+            f"• {source['name']} ({_source_schedule_label(source)}): "
             f"~<b>{_fmt_cop(int(source.get('expected_amount', 0) or 0))}</b>"
             for source in variable_sources
         )
@@ -659,12 +669,12 @@ def _send_step_7(api: RailsApiPort, messenger: MessengerPort, ctx: dict) -> None
     mes_nombre = _month_name(month).capitalize()
 
     base_lines = "\n".join(
-        f"• {source['name']}: {_fmt_cop(int(source.get('expected_amount', 0) or 0))}"
+        f"• {source['name']} ({_source_schedule_label(source)}): {_fmt_cop(int(source.get('expected_amount', 0) or 0))}"
         for source in base_sources
     ) or "• Sin ingresos base registrados"
 
     variable_lines = "\n".join(
-        f"• {source['name']}: {_fmt_cop(int(source.get('expected_amount', 0) or 0))}"
+        f"• {source['name']} ({_source_schedule_label(source)}): {_fmt_cop(int(source.get('expected_amount', 0) or 0))}"
         for source in variable_sources
     ) or "• Sin ingresos extra registrados"
 
