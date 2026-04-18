@@ -461,8 +461,9 @@ def build_tool_map(
             "event_type": input_data["event_type"],
             "payload": input_data.get("payload", {}),
         }
-        if input_data.get("session_id"):
-            body["session_id"] = input_data["session_id"]
+        session_id = input_data.get("session_id") or state.get("session_id")
+        if session_id:
+            body["session_id"] = session_id
 
         response = httpx.post(
             f"{API_URL}/api/v1/agent_events",
