@@ -22,11 +22,18 @@ def _web_tools() -> list[dict]:
     return [t for t in build_tools() if t["name"] not in _WEB_EXCLUDED_TOOLS]
 
 
-def _build_initial_message(message: str | None, event_response: dict | None) -> str:
+def _build_initial_message(
+    message: str | None,
+    event_response: dict | None,
+    budget_context: dict | None = None,
+) -> str:
     parts = [
         "El usuario está interactuando desde la aplicación web.",
         "Respondé usando herramientas visuales (emit_ui_event, navigate_to). No uses send_telegram.",
     ]
+
+    if budget_context:
+        parts.append(f"\n=== CONTEXTO FINANCIERO PRE-CARGADO ===\n{budget_context}\n===")
 
     if event_response:
         event_type = event_response.get("type", "unknown")
@@ -39,6 +46,12 @@ def _build_initial_message(message: str | None, event_response: dict | None) -> 
             parts.append(f"El usuario confirmó la acción (event_id={event_id}). Guardá y cerrá el flujo.")
         elif event_type == "dismissed":
             parts.append(f"El usuario canceló la acción (event_id={event_id}).")
+        elif event_type == "categories_selected":
+            selected = data.get("selected_categories", [])
+            parts.append(f"El usuario seleccionó estas categorías de presupuesto (event_id={event_id}): {selected}. Continuá el wizard de presupuesto al siguiente paso.")
+        elif event_type == "amounts_confirmed":
+            amounts = data.get("amounts", {})
+            parts.append(f"El usuario confirmó los montos por categoría (event_id={event_id}): {amounts}. Calculá el plan y mostrá show_plan_proposal.")
         else:
             parts.append(f"Respuesta del usuario al evento {event_id}: tipo={event_type}, datos={data}")
 
@@ -53,6 +66,7 @@ def handle_web_chat(
     session_id: str,
     message: str | None = None,
     event_response: dict | None = None,
+    budget_context: dict | None = None,
 ) -> None:
     if not message and not event_response:
         logger.warning("[web_chat] session %s: no message nor event_response — skipping", session_id)
@@ -65,7 +79,7 @@ def handle_web_chat(
 
     tool_map = build_tool_map(api, messenger, now_col, state)
 
-    initial_message = _build_initial_message(message, event_response)
+    initial_message = _build_initial_message(message, event_response, budget_context)
 
     try:
         run_agent(

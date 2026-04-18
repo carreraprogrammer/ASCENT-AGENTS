@@ -270,6 +270,8 @@ def build_tools() -> list[dict[str, Any]]:
                             "show_plan_proposal",
                             "show_card",
                             "show_form",
+                            "show_category_selector",
+                            "show_amount_editor",
                             "request_confirmation",
                         ],
                     },
@@ -280,6 +282,8 @@ def build_tools() -> list[dict[str, Any]]:
                             "show_plan_proposal: { draft: MonthlyPlanDraft, warnings: string[] }. "
                             "show_card: { title, body, tone: info|warning|success }. "
                             "show_form: { fields: DynamicField[], prefilled: object }. "
+                            "show_category_selector: { categories: [{code, name, category_type, selected}], title, subtitle }. "
+                            "show_amount_editor: { items: [{code, name, amount, editable}], title, subtitle }. "
                             "request_confirmation: { question, context }."
                         ),
                     },

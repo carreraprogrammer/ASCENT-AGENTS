@@ -38,6 +38,7 @@ class WebChatRequest(BaseModel):
     session_id: str
     message: str | None = None
     event_response: dict | None = None
+    budget_context: dict | None = None
 
 
 @router.post("/nightly")
@@ -67,6 +68,7 @@ async def web_chat(body: WebChatRequest, background_tasks: BackgroundTasks) -> d
         session_id=body.session_id,
         message=body.message,
         event_response=body.event_response,
+        budget_context=body.budget_context,
     )
     return {"ok": True, "session_id": body.session_id}
 
