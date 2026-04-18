@@ -37,6 +37,8 @@ En esta fase el Brain:
 `income_wizard.py` ahora:
 
 - pregunta cadencia explícita
+- pide el monto por evento cuando la cadencia es quincenal o semanal
+- calcula el total mensual internamente antes de persistir `expected_amount`
 - soporta mensual / quincenal / semanal / irregular
 - crea una sola fuente por ingreso, aunque tenga varias ventanas
 - pide confiabilidad solo para el ingreso variable

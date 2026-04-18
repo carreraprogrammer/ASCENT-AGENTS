@@ -65,21 +65,20 @@ def _build_schedules(cadence: str, *, amount: int, window_key: str | None = None
         second = day_2 or 20
         day_from_1, day_to_1 = _day_window(first)
         day_from_2, day_to_2 = _day_window(second)
-        first_amount = round(amount / 2)
         return [
             {
                 "ordinal": 1,
                 "label": "Quincena 1",
                 "expected_day_from": day_from_1,
                 "expected_day_to": day_to_1,
-                "expected_amount": first_amount,
+                "expected_amount": amount,
             },
             {
                 "ordinal": 2,
                 "label": "Quincena 2",
                 "expected_day_from": day_from_2,
                 "expected_day_to": day_to_2,
-                "expected_amount": amount - first_amount,
+                "expected_amount": amount,
             },
         ]
 
@@ -90,8 +89,6 @@ def _build_schedules(cadence: str, *, amount: int, window_key: str | None = None
             ("Semana 3", 15, 21),
             ("Semana 4", 22, 31),
         ]
-        base_amount = amount // len(weekly_windows)
-        remainder = amount - (base_amount * len(weekly_windows))
         schedules: list[dict] = []
         for index, (label, day_from, day_to) in enumerate(weekly_windows, start=1):
             schedules.append(
@@ -100,10 +97,9 @@ def _build_schedules(cadence: str, *, amount: int, window_key: str | None = None
                     "label": label,
                     "expected_day_from": day_from,
                     "expected_day_to": day_to,
-                    "expected_amount": base_amount + (remainder if index == len(weekly_windows) else 0),
+                    "expected_amount": amount,
                 }
             )
-            remainder = 0
         return schedules
 
     if cadence == "monthly":
@@ -136,10 +132,35 @@ def _summary_range(schedules: list[dict]) -> tuple[int, int]:
     )
 
 
+def _monthly_total_from_amount(cadence: str, amount: int) -> int:
+    if cadence == "biweekly":
+        return amount * 2
+    if cadence == "weekly":
+        return amount * 4
+    return amount
+
+
+def _amount_prompt(cadence: str, *, variable: bool = False) -> str:
+    subject = "ese ingreso variable" if variable else "ese ingreso"
+    if cadence == "biweekly":
+        return f"¿Cuánto recibís por <b>quincena</b> de {subject}?\nEjemplo: <code>3200000</code> o <code>3.2M</code>"
+    if cadence == "weekly":
+        return f"¿Cuánto recibís por <b>semana</b> de {subject}?\nEjemplo: <code>800000</code> o <code>800k</code>"
+    if cadence == "irregular":
+        return f"¿Cuánto suele llegar cuando entra {subject}?\nEjemplo: <code>2900000</code> o <code>2.9M</code>"
+    return f"¿Cuánto recibís de {subject} en total al <b>mes</b>?\nEjemplo: <code>6400000</code> o <code>6.4M</code>"
+
+
 def _profile_summary(name: str, amount: int, cadence: str, schedules: list[dict], reliability: int | None = None) -> str:
+    monthly_total = _monthly_total_from_amount(cadence, amount)
+    amount_line = f"<b>{name}</b> — {_fmt_cop(amount)}"
+    if cadence in {"biweekly", "weekly"}:
+        amount_line = f"<b>{name}</b> — {_fmt_cop(amount)} por {'quincena' if cadence == 'biweekly' else 'semana'}"
+
     lines = [
-        f"<b>{name}</b> — {_fmt_cop(amount)}",
+        amount_line,
         f"Cadencia: <b>{cadence}</b>",
+        f"Total mensual esperado: <b>{_fmt_cop(monthly_total)}</b>",
     ]
     if reliability is not None:
         lines.append(f"Confiabilidad: <b>{reliability}%</b>")
@@ -207,15 +228,13 @@ def _handle_callback(
     if key.startswith("base_cadence:"):
         cadence = key.split(":")[1]
         ctx["base_cadence"] = cadence
-        next_step = _next_schedule_step("base", cadence)
-        _go_to_step(api, messenger, pa_id, ctx, next_step)
+        _go_to_step(api, messenger, pa_id, ctx, 3)
         return
 
     if key.startswith("var_cadence:"):
         cadence = key.split(":")[1]
         ctx["var_cadence"] = cadence
-        next_step = _next_schedule_step("var", cadence)
-        _go_to_step(api, messenger, pa_id, ctx, next_step)
+        _go_to_step(api, messenger, pa_id, ctx, 8)
         return
 
     if key.startswith("base_window:"):
@@ -281,11 +300,12 @@ def _handle_message(
         _go_to_step(api, messenger, pa_id, ctx, 2)
         return
 
-    if step == 2:
+    if step == 3:
         amount = _parse_monto(text)
         if amount:
             ctx["base_amount"] = amount
-            _go_to_step(api, messenger, pa_id, ctx, 3)
+            next_step = _next_schedule_step("base", ctx.get("base_cadence", "monthly"))
+            _go_to_step(api, messenger, pa_id, ctx, next_step)
         else:
             messenger.send_message("No entendí el monto. Escríbelo como <code>6400000</code> o <code>6.4M</code>.")
         return
@@ -295,11 +315,12 @@ def _handle_message(
         _go_to_step(api, messenger, pa_id, ctx, 7)
         return
 
-    if step == 7:
+    if step == 8:
         amount = _parse_monto(text)
         if amount:
             ctx["var_amount"] = amount
-            _go_to_step(api, messenger, pa_id, ctx, 8)
+            next_step = _next_schedule_step("var", ctx.get("var_cadence", "monthly"))
+            _go_to_step(api, messenger, pa_id, ctx, next_step)
         else:
             messenger.send_message("No entendí el monto. Escríbelo como <code>2900000</code> o <code>2.9M</code>.")
         return
@@ -334,16 +355,9 @@ def _go_to_step(api: RailsApiPort, messenger: MessengerPort, pa_id: int | str, c
         return
 
     if step == 2:
-        messenger.send_message(
-            f"Perfecto. ¿Cuánto recibís de <b>{ctx.get('base_name', 'ese ingreso')}</b> en total al mes?\n"
-            "Ejemplo: <code>6400000</code> o <code>6.4M</code>"
-        )
-        return
-
-    if step == 3:
         messenger.send_with_buttons(
             text=(
-                f"<b>{ctx.get('base_name', 'Ingreso base')}</b> — {_fmt_cop(int(ctx.get('base_amount', 0) or 0))}\n\n"
+                f"<b>{ctx.get('base_name', 'Ingreso base')}</b>\n\n"
                 "¿Cada cuánto llega?"
             ),
             buttons=[
@@ -352,6 +366,12 @@ def _go_to_step(api: RailsApiPort, messenger: MessengerPort, pa_id: int | str, c
                 [{"text": "Semanal", "callback_data": "wi:base_cadence:weekly"}],
                 [{"text": "Irregular", "callback_data": "wi:base_cadence:irregular"}],
             ],
+        )
+        return
+
+    if step == 3:
+        messenger.send_message(
+            _amount_prompt(ctx.get("base_cadence", "monthly"))
         )
         return
 
@@ -394,16 +414,9 @@ def _go_to_step(api: RailsApiPort, messenger: MessengerPort, pa_id: int | str, c
         return
 
     if step == 7:
-        messenger.send_message(
-            f"¿Cuánto es <b>{ctx.get('var_name', 'ese ingreso variable')}</b> cuando llega?\n"
-            "Ejemplo: <code>2900000</code> o <code>2.9M</code>"
-        )
-        return
-
-    if step == 8:
         messenger.send_with_buttons(
             text=(
-                f"<b>{ctx.get('var_name', 'Ingreso variable')}</b> — {_fmt_cop(int(ctx.get('var_amount', 0) or 0))}\n\n"
+                f"<b>{ctx.get('var_name', 'Ingreso variable')}</b>\n\n"
                 "¿Cada cuánto llega?"
             ),
             buttons=[
@@ -412,6 +425,12 @@ def _go_to_step(api: RailsApiPort, messenger: MessengerPort, pa_id: int | str, c
                 [{"text": "Semanal", "callback_data": "wi:var_cadence:weekly"}],
                 [{"text": "Irregular", "callback_data": "wi:var_cadence:irregular"}],
             ],
+        )
+        return
+
+    if step == 8:
+        messenger.send_message(
+            _amount_prompt(ctx.get("var_cadence", "irregular"), variable=True)
         )
         return
 
@@ -462,7 +481,7 @@ def _build_payload(prefix: str, ctx: dict, classification: str, reliability: int
     day_from, day_to = _summary_range(schedules)
     return {
         "name": ctx[f"{prefix}_name"],
-        "expected_amount": amount,
+        "expected_amount": _monthly_total_from_amount(cadence, amount),
         "expected_day_from": day_from,
         "expected_day_to": day_to,
         "classification": classification,
@@ -483,7 +502,7 @@ def _save_profiles(api: RailsApiPort, messenger: MessengerPort, pa_id: int | str
             "",
             _profile_summary(
                 base_payload["name"],
-                int(base_payload["expected_amount"]),
+                int(ctx["base_amount"]),
                 str(base_payload["cadence"]),
                 list(base_payload["schedules"]),
             ),
@@ -498,7 +517,7 @@ def _save_profiles(api: RailsApiPort, messenger: MessengerPort, pa_id: int | str
                     "",
                     _profile_summary(
                         variable_payload["name"],
-                        int(variable_payload["expected_amount"]),
+                        int(ctx["var_amount"]),
                         str(variable_payload["cadence"]),
                         list(variable_payload["schedules"]),
                         reliability,
