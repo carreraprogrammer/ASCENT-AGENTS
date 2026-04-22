@@ -15,6 +15,7 @@ import imaplib
 import email
 import json
 import re
+import calendar
 from datetime import datetime, timezone, timedelta
 
 from ports.rails_api import RailsApiPort
@@ -24,6 +25,10 @@ from adapters.rails_http import BASE_URL as API_BASE_URL, build_auth_headers
 
 COLOMBIA_TZ = timezone(timedelta(hours=-5))
 MESES = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"]
+MESES_FULL = [
+    "Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio",
+    "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
+]
 
 GMAIL_ADDR = os.environ.get("GMAIL_ADDRESS", "")
 GMAIL_PASS = os.environ.get("GMAIL_APP_PASSWORD", "")
@@ -94,15 +99,17 @@ def _flatten_transaction(t: dict) -> dict:
     cat_ref = t.get("relationships", {}).get("category", {}).get("data")
     sub_ref = t.get("relationships", {}).get("subcategory", {}).get("data")
     return {
-        "id":             t.get("id"),
-        "date":           a.get("date"),
-        "concept":        a.get("concept"),
-        "product":        a.get("product"),
-        "amount":         a.get("amount"),
-        "type":           a.get("transaction_type"),
-        "status":         a.get("status"),
-        "category_id":    cat_ref["id"] if cat_ref else None,
-        "subcategory_id": sub_ref["id"] if sub_ref else None,
+        "id":               t.get("id"),
+        "date":             a.get("date"),
+        "concept":          a.get("concept"),
+        "product":          a.get("product"),
+        "amount":           a.get("amount"),
+        "type":             a.get("transaction_type"),
+        "status":           a.get("status"),
+        "category_code":    a.get("category_code"),
+        "subcategory_code": a.get("subcategory_code"),
+        "category_id":      cat_ref["id"] if cat_ref else None,
+        "subcategory_id":   sub_ref["id"] if sub_ref else None,
     }
 
 
@@ -396,7 +403,8 @@ TOOLS = [
         "name": "send_telegram",
         "description": (
             "Envía un mensaje a Daniel. Soporta inline_keyboard para botones interactivos. "
-            "Callback data: 'cat:{id}:{subcat_code}' | 'confirm:{id}' | 'skip:{id}'."
+            "Callback data: 'cat:{id}:{subcat_code}' | 'confirm:{id}' | 'skip:{id}' | "
+            "'wizard:open:{YYYY-MM}' | 'wizard:snooze:{YYYY-MM}'."
         ),
         "input_schema": {
             "type": "object",
@@ -434,9 +442,86 @@ TOOLS = [
 ]
 
 
+def _month_end_context(now: datetime) -> dict:
+    """
+    Computes next-month variables using the Colombia-timezone date.
+
+    Returns a dict with:
+      - is_month_end      : bool  — True if day is 28, 29, 30 or 31
+      - day_of_month      : int
+      - days_until_month_end : int  (0 on the last day of the month)
+      - next_month_name   : str   — e.g. "Mayo"
+      - next_month_yyyy_mm: str   — e.g. "2026-05"
+    """
+    day = now.day
+    year, month = now.year, now.month
+    last_day = calendar.monthrange(year, month)[1]
+    days_until_end = last_day - day
+
+    # Next month (wraps Dec → Jan of next year)
+    if month == 12:
+        nm_year, nm_month = year + 1, 1
+    else:
+        nm_year, nm_month = year, month + 1
+
+    return {
+        "is_month_end":          day >= 28,
+        "day_of_month":          day,
+        "days_until_month_end":  days_until_end,
+        "next_month_name":       MESES_FULL[nm_month - 1],
+        "next_month_yyyy_mm":    f"{nm_year}-{nm_month:02d}",
+    }
+
+
+def _month_end_alert_block(me: dict) -> str:
+    """
+    Returns the full ALERTA FIN DE MES section text, pre-rendered so it can
+    be safely embedded in the outer f-string without nested-quote conflicts.
+    """
+    day        = me["day_of_month"]
+    days_left  = me["days_until_month_end"]
+    nm_name    = me["next_month_name"]
+    nm_yyyymm  = me["next_month_yyyy_mm"]
+    dias_word  = "día" if days_left == 1 else "días"
+
+    header = (
+        f"Hoy es día {day} del mes. "
+        + ("⚠️ Estamos en zona de cierre de mes." if me["is_month_end"] else "No es fin de mes — omitir esta sección completamente.")
+    )
+
+    if not me["is_month_end"]:
+        return header
+
+    detail = (
+        f"Si hoy es día 28, 29, 30 o 31 del mes actual (y lo es — día {day}):\n\n"
+        f"1. El mes siguiente es {nm_name} ({nm_yyyymm}).\n"
+        f"   Faltan {days_left} {dias_word} para que empiece.\n\n"
+        f"2. Verificá en el resultado de get_summary si ya existe un monthly_plan confirmado para {nm_yyyymm}.\n"
+        f"   - Buscá en el campo monthly_plan del summary o en cualquier plan con period_start que contenga {nm_yyyymm}.\n"
+        f"   - Si el summary no lo reporta explícitamente, asumí que NO existe plan.\n\n"
+        f"3. Si NO existe plan confirmado para {nm_name}:\n"
+        f"   - Al final del resumen nocturno, antes de la sección ⚙️ de gaps, incluí esta sección especial:\n\n"
+        f"   ━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"   📅 {nm_name} empieza en {days_left} {dias_word}.\n"
+        f"   ¿Armamos el plan financiero para {nm_name}?\n\n"
+        f"   Ya tengo sugerencias basadas en tus últimos 3 meses.\n"
+        f"   ━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"   Envialo con send_telegram usando inline_keyboard con dos botones en filas separadas:\n"
+        f'   [[ {{"text": "Armar plan ahora 📋", "callback_data": "wizard:open:{nm_yyyymm}"}} ],\n'
+        f'    [ {{"text": "Recordarme mañana ⏰", "callback_data": "wizard:snooze:{nm_yyyymm}"}} ]]\n\n'
+        f"   Tono: primera persona, directo. No es un recordatorio genérico — es una acción concreta.\n\n"
+        f"4. Si YA existe plan confirmado para {nm_name}: omitir esta sección completamente.\n\n"
+        f"5. Si es fin de mes pero el usuario ya presionó \"Recordarme mañana\" "
+        f"(detectás un mensaje de snooze reciente en get_telegram_messages): omitir también."
+    )
+    return f"{header}\n\n{detail}"
+
+
 def _build_system_prompt() -> str:
     now_col = datetime.now(COLOMBIA_TZ)
     hoja = MESES[now_col.month - 1]
+    me = _month_end_context(now_col)
+    alert_block = _month_end_alert_block(me)
     return f"""Eres el coach financiero personal de el usuario.
 Ejecutas la revisión nocturna de sus finanzas: lees gastos del día, los registras en la API, y le envías un resumen con coaching.
 
@@ -446,6 +531,8 @@ Ejecutas la revisión nocturna de sus finanzas: lees gastos del día, los regist
 - Directo, reflexivo, le molesta el texto genérico o condescendiente
 - Honestidad brutal > falsa motivación
 - Mes actual: {hoja} | Fecha: {now_col.strftime("%d/%m/%Y")} | Hora Colombia: {now_col.strftime("%H:%M")}
+- Día del mes: {me["day_of_month"]} | Días hasta fin de mes: {me["days_until_month_end"]}
+- Mes siguiente: {me["next_month_name"]} ({me["next_month_yyyy_mm"]})
 
 ═══ PRODUCTOS FINANCIEROS ═══
 - nequi     → billetera Nequi
@@ -455,12 +542,36 @@ Ejecutas la revisión nocturna de sus finanzas: lees gastos del día, los regist
 - bre-b     → transferencias Bre-B
 
 ═══ SUBCATEGORÍAS VÁLIDAS ═══
-INGRESO:      salario | freelance | reembolso | arriendo_recibido | otros_ingreso
-COMPROMETIDO: arriendo | creditos | seguros | servicios_publicos | colegiaturas
-NECESARIO:    mercado | gasolina | transporte | salud | celular
-DISCRECIONAL: restaurantes | delivery | ocio | ropa | tecnologia | suscripciones
-INVERSIÓN:    cursos | libros | suplementos | herramientas | ahorro_voluntario
-SOCIAL:       regalos | salidas | familia | donaciones
+
+committed (Comprometido):
+  arriendo, creditos, seguros, servicios_publicos, colegiaturas
+
+necessary (Necesario):
+  mercado, gasolina, transporte, salud, celular
+
+discretionary (Discrecional):
+  restaurantes, delivery, ocio, ropa, tecnologia, suscripciones
+
+investment (Inversión):
+  cursos, libros, suplementos, herramientas, ahorro_voluntario
+
+social (Social):
+  regalos, salidas, familia, donaciones
+
+income (Ingreso):
+  salario, freelance, reembolso, arriendo_recibido, otros_ingreso
+
+unknown: usá cuando la categoría no está clara — subcategory_code = null
+
+═══ REGLA DE AMBIGÜEDAD EN SUBCATEGORÍA ═══
+- Clasificar directamente si el contexto hace clara la subcategoría
+- Preguntar solo si la diferencia de subcategoría cambia el análisis conductual:
+  * "Fui a restaurante con mis papás" → preguntar: ¿discretionary/restaurantes o social/salidas?
+  * "Compré audífonos Sony" → preguntar: ¿discretionary/tecnologia o investment/herramientas?
+  * "Pagué el arriendo" → clasificar directamente: committed/arriendo
+  * "Compré en el Éxito" → clasificar directamente: necessary/mercado
+- Para montos menores a 50.000 COP con contexto claro, no preguntar — clasificar directamente
+- El usuario siempre puede cambiar la clasificación después
 
 ═══ REGLA CRÍTICA — PAGOS A TARJETA DE CRÉDITO ═══
 Cuando Gmail muestra "Abono TC", "Pago TC", "Pago tarjeta", "Pago mínimo":
@@ -507,6 +618,21 @@ Si get_summary o get_financial_context devuelve phase=null o data=null:
 - Mencionalo al final del resumen: "⚙️ Falta configurar tu contexto financiero — escribí configurar contexto financiero y te guío en 3 pasos."
 - No hagas el resumen incompleto por esto, usá los datos disponibles.
 
+═══ SUBCATEGORÍAS PENDIENTES ═══
+Después de registrar los gastos del día, revisá las transacciones del mes con subcategory_code = null:
+1. Llamá get_transactions para obtener la lista completa del mes.
+2. Para cada transacción sin subcategoría, intentá asignarla basándote en:
+   - descripción del concepto
+   - monto (montos menores a 50.000 COP con descripción clara → clasificar directamente)
+   - historial de transacciones similares del mismo mes
+3. Si podés determinarla con confianza → update_transaction con subcategory_code.
+4. Si quedan transacciones sin subcategoría que no pudiste resolver:
+   - Agrupalas en un solo mensaje de Telegram al final del resumen.
+   - Formato: "📂 Estas transacciones aún no tienen subcategoría — ¿me ayudás a clasificarlas?"
+   - Enviá los botones de subcategoría solo para las transacciones ambiguas (no para las que ya resolviste).
+   - Usá inline_keyboard con callback_data: 'cat:{id}:{subcat_code}' para cada opción.
+5. Si todas tienen subcategoría asignada, omitir esta sección en el resumen.
+
 ═══ LECTURA CONDUCTUAL ═══
 No te limites a listar movimientos. Interpretá el patrón:
 - discretionary alto → señalá gasto elegido y dónde conviene meter fricción
@@ -521,6 +647,9 @@ Si get_telegram_messages devuelve resolved_callbacks:
   - type "confirm":    update_transaction(id=..., status="confirmed")
   - type "skip":       update_transaction(id=..., clarification_resolved_at=fecha_hoy)
 
+═══ ALERTA FIN DE MES ═══
+{alert_block}
+
 ═══ FLUJO RECOMENDADO ═══
 1. get_completeness → detectar gaps de contexto ANTES de todo
 2. get_summary → alertas de presupuesto + estado plan quincenal + overflow si aplica
@@ -532,7 +661,9 @@ Si get_telegram_messages devuelve resolved_callbacks:
 8. get_pending_transactions → pendientes de días anteriores
 9. Registrar solo los gastos de Gmail que NO estén ya en Telegram/transactions → create_transaction
 10. Para gastos inciertos → create_transaction(pending) + send_telegram con botones
-11. send_telegram → resumen con sección ⚙️ de gaps si aplica
+11. Resolver subcategorías pendientes: get_transactions → asignar las que se puedan → agrupar ambiguas
+12. send_telegram → resumen con sección ⚙️ de gaps si aplica + sección 📂 de subcategorías pendientes si aplica
+13. Fin de mes (días 28–31): si no existe plan para el mes siguiente, agregar sección de alerta al resumen (puede ir dentro del mismo send_telegram del paso 12) con inline_keyboard de dos botones.
 
 ═══ RESUMEN FINAL ═══
 💰 <b>Revisión Daniel 15K — {now_col.strftime("%d/%m/%Y")}</b>

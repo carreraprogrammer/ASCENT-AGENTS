@@ -201,9 +201,11 @@ async def _dispatch(api: RailsHttpAdapter, messenger: TelegramMessenger, parsed)
 def _handle_wizard_trigger(api: RailsHttpAdapter, messenger: TelegramMessenger, data: str) -> None:
     """
     Maneja los botones del mensaje de trigger quincenal:
-      wizard:start    → crear PendingAction e ir al step 1
-      wizard:tomorrow → crear PendingAction con expires_at=+24h
-      wizard:skip     → no hacer nada
+      wizard:start              → crear PendingAction e ir al step 1
+      wizard:tomorrow           → crear PendingAction con expires_at=+24h
+      wizard:skip               → no hacer nada
+      wizard:open:{YYYY-MM}     → redirigir al planificador web
+      wizard:snooze:{YYYY-MM}   → confirmar snooze; el agente nocturno vuelve a alertar mañana
     """
     if data == "wizard:start":
         action = api.create_pending_action(
@@ -227,6 +229,24 @@ def _handle_wizard_trigger(api: RailsHttpAdapter, messenger: TelegramMessenger, 
 
     elif data == "wizard:skip":
         messenger.send_message("Ok, sin presupuesto este período. Cualquier cosa me avisás.")
+
+    elif data.startswith("wizard:open:"):
+        # wizard:open:{YYYY-MM} — el planning real ocurre en la app web
+        yyyy_mm = data.removeprefix("wizard:open:")
+        try:
+            year, month = int(yyyy_mm[:4]), int(yyyy_mm[5:7])
+            from agents.nightly import MESES_FULL
+            mes_nombre = MESES_FULL[month - 1]
+        except (ValueError, IndexError):
+            mes_nombre = yyyy_mm
+        messenger.send_message(
+            f"Abrí el planificador en la app web para <b>{mes_nombre}</b>. "
+            f"Ve a la sección Presupuesto para armarlo. 📱"
+        )
+
+    elif data.startswith("wizard:snooze:"):
+        # wizard:snooze:{YYYY-MM} — snooze silencioso; el agente nightly alerta de nuevo mañana
+        messenger.send_message("Perfecto, te recuerdo mañana. 👍")
 
     else:
         logger.warning("[webhook] wizard trigger desconocido: %s", data)
