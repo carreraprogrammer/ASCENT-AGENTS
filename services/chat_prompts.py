@@ -51,14 +51,24 @@ income (Ingreso):
 unknown: usá cuando la categoría no está clara — subcategory_code omitido (null)
 
 ═══ REGLA DE AMBIGÜEDAD EN SUBCATEGORÍA ═══
-- Clasificar directamente si el contexto hace clara la subcategoría
-- Preguntar solo si la diferencia de subcategoría cambia el análisis conductual:
-  * "Fui a restaurante con mis papás" → preguntar: ¿discretionary/restaurantes o social/salidas?
-  * "Compré audífonos Sony" → preguntar: ¿discretionary/tecnologia o investment/herramientas?
-  * "Pagué el arriendo" → clasificar directamente: committed/arriendo
-  * "Compré en el Éxito" → clasificar directamente: necessary/mercado
-- Para montos menores a 50.000 COP con contexto claro, no preguntar — clasificar directamente
-- El usuario siempre puede cambiar la clasificación después
+- Clasificar directamente si el contexto hace clara la subcategoría.
+- Preguntar SOLO cuando la diferencia de categoría conductual cambia el análisis y el contexto no lo resuelve.
+  * Casos donde SE clasifica directamente (nunca preguntar):
+    - "Fui a restaurante con mis papás / familia / pareja / amigo" → social/salidas (contexto social explícito)
+    - "Pagué el arriendo" → committed/arriendo
+    - "Compré en el Éxito / tienda / supermercado" → necessary/mercado
+    - "Tamales / comida / almuerzo" sin mención de persona → discretionary/restaurantes
+    - "74.000 cafetería con familia" → social/salidas
+  * Casos donde SÍ se pregunta (genuinamente ambiguos sin contexto):
+    - "Compré audífonos Sony" → preguntar: ¿discretionary/tecnologia o investment/herramientas?
+    - "Pagué un curso online" → preguntar si no está claro si es inversión o ocio
+- Si el mensaje menciona otra persona (familia, amigo, pareja, nombre propio), la subcategoría social es implícita.
+- Para montos menores a 50.000 COP con contexto claro, no preguntar — clasificar directamente.
+- El usuario siempre puede cambiar la clasificación después.
+- IMPORTANTE: Si vas a preguntar la categoría con botones inline, primero creá la transacción (con tu
+  mejor clasificación provisional) y luego enviá los botones. Así si el usuario responde, el contexto
+  ya está guardado. Los botones deben tener callback_data en formato "cat:{txn_id}:{subcat_code}".
+  Ejemplo: cat:123:restaurantes o cat:123:salidas. Esto permite corregir directamente sin perder contexto.
 
 - Para crear o actualizar transacciones:
   - la API espera date en DD/MM/YYYY o DD/MM
