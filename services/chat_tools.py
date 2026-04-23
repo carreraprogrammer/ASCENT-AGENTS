@@ -202,22 +202,37 @@ def build_tools() -> list[dict[str, Any]]:
         },
         {
             "name": "create_recurring_obligation",
-            "description": "Crea un gasto fijo recurrente.",
+            "description": (
+                "Crea un gasto fijo recurrente. "
+                "Siempre intentá asignar category_id y subcategory_id usando get_categories primero. "
+                "due_day es el día del mes en que vence (1-31)."
+            ),
             "input_schema": {
                 "type": "object",
-                "properties": {"name": {"type": "string"}, "amount": {"type": "integer"}, "notes": {"type": "string"}},
+                "properties": {
+                    "name": {"type": "string"},
+                    "amount": {"type": "integer"},
+                    "due_day": {"type": "integer", "minimum": 1, "maximum": 31},
+                    "category_id": {"type": "integer"},
+                    "subcategory_id": {"type": "integer"},
+                    "active": {"type": "boolean"},
+                    "notes": {"type": "string"},
+                },
                 "required": ["name", "amount"],
             },
         },
         {
             "name": "update_recurring_obligation",
-            "description": "Actualiza un gasto fijo recurrente.",
+            "description": "Actualiza un gasto fijo recurrente. Puede corregir monto, nombre, categoría, subcategoría o estado activo.",
             "input_schema": {
                 "type": "object",
                 "properties": {
                     "id": {"type": "string"},
                     "name": {"type": "string"},
                     "amount": {"type": "integer"},
+                    "due_day": {"type": "integer", "minimum": 1, "maximum": 31},
+                    "category_id": {"type": "integer"},
+                    "subcategory_id": {"type": "integer"},
                     "active": {"type": "boolean"},
                     "notes": {"type": "string"},
                 },
@@ -227,6 +242,61 @@ def build_tools() -> list[dict[str, Any]]:
         {
             "name": "delete_recurring_obligation",
             "description": "Desactiva un gasto fijo recurrente.",
+            "input_schema": {
+                "type": "object",
+                "properties": {"id": {"type": "string"}},
+                "required": ["id"],
+            },
+        },
+        {
+            "name": "create_income_source",
+            "description": (
+                "Crea una fuente de ingreso recurrente. "
+                "classification: 'base' para ingresos fijos confiables, 'variable' para ingresos inconsistentes, "
+                "'seasonal' para ingresos estacionales. "
+                "expected_day_from / expected_day_to definen la ventana del mes en que suele llegar (1-31)."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "expected_amount": {"type": "integer"},
+                    "classification": {
+                        "type": "string",
+                        "enum": ["base", "variable", "seasonal"],
+                    },
+                    "expected_day_from": {"type": "integer", "minimum": 1, "maximum": 31},
+                    "expected_day_to": {"type": "integer", "minimum": 1, "maximum": 31},
+                    "active": {"type": "boolean"},
+                    "notes": {"type": "string"},
+                },
+                "required": ["name", "expected_amount", "classification"],
+            },
+        },
+        {
+            "name": "update_income_source",
+            "description": "Actualiza una fuente de ingreso existente. Puede corregir monto, nombre, clasificación o estado.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "name": {"type": "string"},
+                    "expected_amount": {"type": "integer"},
+                    "classification": {
+                        "type": "string",
+                        "enum": ["base", "variable", "seasonal"],
+                    },
+                    "expected_day_from": {"type": "integer", "minimum": 1, "maximum": 31},
+                    "expected_day_to": {"type": "integer", "minimum": 1, "maximum": 31},
+                    "active": {"type": "boolean"},
+                    "notes": {"type": "string"},
+                },
+                "required": ["id"],
+            },
+        },
+        {
+            "name": "delete_income_source",
+            "description": "Desactiva una fuente de ingreso.",
             "input_schema": {
                 "type": "object",
                 "properties": {"id": {"type": "string"}},
@@ -501,5 +571,8 @@ def build_tool_map(
         "create_recurring_obligation": lambda p: _post("/api/v1/recurring_obligations", p),
         "update_recurring_obligation": lambda p: _patch(f"/api/v1/recurring_obligations/{p.pop('id')}", p),
         "delete_recurring_obligation": lambda p: _delete(f"/api/v1/recurring_obligations/{p['id']}"),
+        "create_income_source": lambda p: _post("/api/v1/income_sources", p),
+        "update_income_source": lambda p: _patch(f"/api/v1/income_sources/{p.pop('id')}", p),
+        "delete_income_source": lambda p: _delete(f"/api/v1/income_sources/{p['id']}"),
         "send_telegram": lambda p: state.update({"responded": True}) or _send_telegram(messenger, p),
     }
