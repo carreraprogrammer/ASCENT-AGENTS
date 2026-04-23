@@ -630,7 +630,7 @@ Después de registrar los gastos del día, revisá las transacciones del mes con
    - Agrupalas en un solo mensaje de Telegram al final del resumen.
    - Formato: "📂 Estas transacciones aún no tienen subcategoría — ¿me ayudás a clasificarlas?"
    - Enviá los botones de subcategoría solo para las transacciones ambiguas (no para las que ya resolviste).
-   - Usá inline_keyboard con callback_data: 'cat:{id}:{subcat_code}' para cada opción.
+   - Usá inline_keyboard con callback_data: 'cat:{{id}}:{{subcat_code}}' para cada opción.
 5. Si todas tienen subcategoría asignada, omitir esta sección en el resumen.
 
 ═══ LECTURA CONDUCTUAL ═══
