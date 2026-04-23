@@ -14,7 +14,7 @@ DEFAULT_PROVIDER = "kimi"
 DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-4-6",
     "openai": "gpt-4.1-mini",
-    "kimi": "kimi-k2.5",
+    "kimi": "kimi-k2.6",
 }
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 KIMI_BASE_URL = "https://api.moonshot.ai/v1"

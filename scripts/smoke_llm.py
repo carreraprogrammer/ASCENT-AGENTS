@@ -4,7 +4,7 @@ Smoke test real para providers LLM con tool calling.
 Uso:
   source .env
   LLM_PROVIDER=openai LLM_MODEL=gpt-4.1-mini ./.venv/bin/python scripts/smoke_llm.py
-  LLM_PROVIDER=kimi LLM_MODEL=kimi-k2.5 ./.venv/bin/python scripts/smoke_llm.py
+  LLM_PROVIDER=kimi LLM_MODEL=kimi-k2.6 ./.venv/bin/python scripts/smoke_llm.py
 """
 
 from __future__ import annotations

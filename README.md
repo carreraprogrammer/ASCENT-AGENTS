@@ -24,7 +24,7 @@ Validación real de esta fase:
 Estado operativo elegido:
 
 - provider por defecto recomendado para esta fase: `kimi`
-- modelo por defecto recomendado para esta fase: `kimi-k2.5`
+- modelo por defecto recomendado para esta fase: `kimi-k2.6`
 
 Límites explícitos:
 
@@ -234,7 +234,7 @@ Configuración recomendada para esta fase:
 
 ```env
 LLM_PROVIDER=kimi
-LLM_MODEL=kimi-k2.5
+LLM_MODEL=kimi-k2.6
 ```
 
 Cómo probar localmente:
@@ -243,7 +243,7 @@ Cómo probar localmente:
 source .env
 ./.venv/bin/python -c "from services.llm_factory import resolve_llm_provider_name, resolve_llm_model; print(resolve_llm_provider_name(), resolve_llm_model())"
 LLM_PROVIDER=openai LLM_MODEL=gpt-4.1-mini ./.venv/bin/python scripts/smoke_llm.py
-LLM_PROVIDER=kimi LLM_MODEL=kimi-k2.5 ./.venv/bin/python scripts/smoke_llm.py
+LLM_PROVIDER=kimi LLM_MODEL=kimi-k2.6 ./.venv/bin/python scripts/smoke_llm.py
 ```
 
 Cómo comparar providers con el mismo brain:
