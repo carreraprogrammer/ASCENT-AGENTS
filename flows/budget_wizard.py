@@ -400,7 +400,7 @@ def _committed_breakdown(api: RailsApiPort) -> tuple[list[str], int]:
     for obligation in api.get_recurring_obligations():
         if not obligation.get("active", True):
             continue
-        if obligation.get("allocatable_type") == "Debt":
+        if obligation.get("source_type") == "Debt" or obligation.get("allocatable_type") == "Debt":
             continue
         amount = int(obligation.get("amount", 0) or 0)
         recurring_total += amount

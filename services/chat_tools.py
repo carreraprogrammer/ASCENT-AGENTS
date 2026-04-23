@@ -85,7 +85,12 @@ def build_tools() -> list[dict[str, Any]]:
         },
         {
             "name": "get_recurring_obligations",
-            "description": "Gastos recurrentes.",
+            "description": "Gastos recurrentes. Incluye source_type/source_id cuando la obligación viene de una deuda o inversión estructural.",
+            "input_schema": {"type": "object", "properties": {}, "required": []},
+        },
+        {
+            "name": "get_planned_expenses",
+            "description": "Gastos futuros previsibles que todavía no son transacciones reales ni obligaciones mensuales.",
             "input_schema": {"type": "object", "properties": {}, "required": []},
         },
         {
@@ -205,7 +210,8 @@ def build_tools() -> list[dict[str, Any]]:
             "description": (
                 "Crea un gasto fijo recurrente. "
                 "Siempre intentá asignar category_id y subcategory_id usando get_categories primero. "
-                "due_day es el día del mes en que vence (1-31)."
+                "due_day es el día del mes en que vence (1-31). "
+                "Si la obligación corresponde a una deuda ya existente, podés pasar source_type=Debt y source_id."
             ),
             "input_schema": {
                 "type": "object",
@@ -215,6 +221,8 @@ def build_tools() -> list[dict[str, Any]]:
                     "due_day": {"type": "integer", "minimum": 1, "maximum": 31},
                     "category_id": {"type": "integer"},
                     "subcategory_id": {"type": "integer"},
+                    "source_type": {"type": "string", "enum": ["Debt", "Investment"]},
+                    "source_id": {"type": "integer"},
                     "active": {"type": "boolean"},
                     "notes": {"type": "string"},
                 },
@@ -223,7 +231,7 @@ def build_tools() -> list[dict[str, Any]]:
         },
         {
             "name": "update_recurring_obligation",
-            "description": "Actualiza un gasto fijo recurrente. Puede corregir monto, nombre, categoría, subcategoría o estado activo.",
+            "description": "Actualiza un gasto fijo recurrente. Puede corregir monto, nombre, categoría, subcategoría, vínculo estructural o estado activo.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -233,7 +241,55 @@ def build_tools() -> list[dict[str, Any]]:
                     "due_day": {"type": "integer", "minimum": 1, "maximum": 31},
                     "category_id": {"type": "integer"},
                     "subcategory_id": {"type": "integer"},
+                    "source_type": {"type": "string", "enum": ["Debt", "Investment"]},
+                    "source_id": {"type": "integer"},
                     "active": {"type": "boolean"},
+                    "notes": {"type": "string"},
+                },
+                "required": ["id"],
+            },
+        },
+        {
+            "name": "create_planned_expense",
+            "description": (
+                "Crea un gasto futuro previsible que todavía no es transacción real ni obligación mensual. "
+                "Úsalo para SOAT, tecnomecánica, viajes, ropa o compras planeadas."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "amount_estimated": {"type": "integer"},
+                    "target_date": {"type": "string", "description": "Fecha ISO 8601 YYYY-MM-DD."},
+                    "planning_type": {
+                        "type": "string",
+                        "enum": ["mandatory_one_off", "irregular_maintenance", "wish", "planned_purchase"],
+                    },
+                    "status": {"type": "string", "enum": ["planned", "executed", "cancelled"]},
+                    "category_id": {"type": "integer"},
+                    "subcategory_id": {"type": "integer"},
+                    "notes": {"type": "string"},
+                },
+                "required": ["name", "amount_estimated", "target_date", "planning_type", "category_id", "subcategory_id"],
+            },
+        },
+        {
+            "name": "update_planned_expense",
+            "description": "Actualiza un gasto planeado. Sirve para corregir monto/fecha o marcarlo como ejecutado o cancelado.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "name": {"type": "string"},
+                    "amount_estimated": {"type": "integer"},
+                    "target_date": {"type": "string", "description": "Fecha ISO 8601 YYYY-MM-DD."},
+                    "planning_type": {
+                        "type": "string",
+                        "enum": ["mandatory_one_off", "irregular_maintenance", "wish", "planned_purchase"],
+                    },
+                    "status": {"type": "string", "enum": ["planned", "executed", "cancelled"]},
+                    "category_id": {"type": "integer"},
+                    "subcategory_id": {"type": "integer"},
                     "notes": {"type": "string"},
                 },
                 "required": ["id"],
@@ -559,6 +615,7 @@ def build_tool_map(
         "get_financial_context": lambda _: api.get_financial_context(),
         "get_income_sources": lambda _: api.get_income_sources(),
         "get_recurring_obligations": lambda _: api.get_recurring_obligations(),
+        "get_planned_expenses": lambda _: api.get_planned_expenses(),
         "create_transaction": _create_transaction,
         "update_transaction": lambda p: _patch(f"/api/v1/transactions/{p.pop('id')}", p),
         "delete_transaction": lambda p: _delete(f"/api/v1/transactions/{p['id']}"),
@@ -571,6 +628,8 @@ def build_tool_map(
         "create_recurring_obligation": lambda p: _post("/api/v1/recurring_obligations", p),
         "update_recurring_obligation": lambda p: _patch(f"/api/v1/recurring_obligations/{p.pop('id')}", p),
         "delete_recurring_obligation": lambda p: _delete(f"/api/v1/recurring_obligations/{p['id']}"),
+        "create_planned_expense": lambda p: _post("/api/v1/planned_expenses", p),
+        "update_planned_expense": lambda p: _patch(f"/api/v1/planned_expenses/{p.pop('id')}", p),
         "create_income_source": lambda p: _post("/api/v1/income_sources", p),
         "update_income_source": lambda p: _patch(f"/api/v1/income_sources/{p.pop('id')}", p),
         "delete_income_source": lambda p: _delete(f"/api/v1/income_sources/{p['id']}"),

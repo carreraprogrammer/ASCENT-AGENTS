@@ -4,6 +4,21 @@
 
 FastAPI corriendo en Railway. Recibe mensajes de Telegram vía webhook, corre agentes Claude con tool use, y programa automatizaciones nocturnas y quincenales con APScheduler — sin GitHub Actions.
 
+## Capacidades financieras expuestas hoy
+
+- leer `summary`, deudas, ingresos y obligaciones recurrentes
+- crear y actualizar `recurring_obligations`
+- leer, crear y actualizar `planned_expenses`
+- consultar relación deuda ↔ obligación recurrente vía `source_type/source_id`
+
+Regla operativa:
+
+- flujo mensual → `recurring_obligations`
+- estado del pasivo → `debts`
+- planeación futura → `planned_expenses`
+
+El Brain no debe registrar como transacción algo que todavía es solo gasto futuro previsible.
+
 ---
 
 ## Rol en la arquitectura

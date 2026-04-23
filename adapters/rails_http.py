@@ -218,3 +218,39 @@ class RailsHttpAdapter(RailsApiPort):
     def get_recurring_obligations(self) -> list[dict]:
         data = self._get("/api/v1/recurring_obligations")
         return data if isinstance(data, list) else data.get("data", [])
+
+    # --- planned expenses ---
+
+    def get_planned_expenses(self) -> list[dict]:
+        data = self._get("/api/v1/planned_expenses")
+        return data if isinstance(data, list) else data.get("data", [])
+
+    def create_planned_expense(
+        self,
+        *,
+        name: str,
+        amount_estimated: int,
+        target_date: str,
+        planning_type: str,
+        status: str = "planned",
+        category_id: int,
+        subcategory_id: int,
+        notes: str | None = None,
+    ) -> dict:
+        payload = {
+            "name": name,
+            "amount_estimated": amount_estimated,
+            "target_date": target_date,
+            "planning_type": planning_type,
+            "status": status,
+            "category_id": category_id,
+            "subcategory_id": subcategory_id,
+        }
+        if notes:
+            payload["notes"] = notes
+
+        result = self._post("/api/v1/planned_expenses", payload)
+        return result.get("data", result) if isinstance(result, dict) else result
+
+    def update_planned_expense(self, planned_expense_id: int | str, **attrs) -> dict:
+        return self._patch(f"/api/v1/planned_expenses/{planned_expense_id}", attrs)

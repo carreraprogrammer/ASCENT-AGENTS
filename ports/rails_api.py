@@ -133,3 +133,29 @@ class RailsApiPort(ABC):
     def get_recurring_obligations(self) -> list[dict]:
         """GET /api/v1/recurring_obligations"""
         ...
+
+    @abstractmethod
+    def get_planned_expenses(self) -> list[dict]:
+        """GET /api/v1/planned_expenses"""
+        ...
+
+    @abstractmethod
+    def create_planned_expense(
+        self,
+        *,
+        name: str,
+        amount_estimated: int,
+        target_date: str,
+        planning_type: str,
+        status: str = "planned",
+        category_id: int,
+        subcategory_id: int,
+        notes: str | None = None,
+    ) -> dict:
+        """POST /api/v1/planned_expenses"""
+        ...
+
+    @abstractmethod
+    def update_planned_expense(self, planned_expense_id: int | str, **attrs) -> dict:
+        """PATCH /api/v1/planned_expenses/:id"""
+        ...
