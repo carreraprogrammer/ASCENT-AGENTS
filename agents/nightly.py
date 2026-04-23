@@ -4,7 +4,7 @@ agents/nightly.py — Revisión nocturna migrada al Brain.
 Diferencias vs revision_nocturna.py original:
 - Usa RailsApiPort (inyectado) en lugar de llamadas directas a requests
 - Usa MessengerPort (inyectado) en lugar de _tg() directo
-- Usa services/claude_client.py para el loop agentic
+- Usa una capa LLM multi-provider para el loop agentic
 - Incluye alertas de burn_rate si el summary las trae
 - Menciona si el plan del mes está aprobado o falta aprobar
 - Gmail sigue siendo IMAP directo (no pasa por Rails)
@@ -20,8 +20,8 @@ from datetime import datetime, timezone, timedelta
 
 from ports.rails_api import RailsApiPort
 from ports.messenger import MessengerPort
-from services.claude_client import run_agent
 from adapters.rails_http import BASE_URL as API_BASE_URL, build_auth_headers
+from services.llm_factory import build_llm_provider, resolve_llm_model
 
 COLOMBIA_TZ = timezone(timedelta(hours=-5))
 MESES = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"]
@@ -32,7 +32,6 @@ MESES_FULL = [
 
 GMAIL_ADDR = os.environ.get("GMAIL_ADDRESS", "")
 GMAIL_PASS = os.environ.get("GMAIL_APP_PASSWORD", "")
-NIGHTLY_MODEL = "claude-sonnet-4-6"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -694,13 +693,14 @@ def run_nightly(api: RailsApiPort, messenger: MessengerPort) -> None:
 
     tool_map = build_tool_map(api, messenger)
 
-    run_agent(
+    provider = build_llm_provider()
+    provider.run_agent(
         system_prompt=_build_system_prompt(),
         tools=TOOLS,
         tool_map=tool_map,
         initial_message=f"Ejecuta la revisión nocturna para hoy {fecha}.",
         max_iterations=25,
-        model=NIGHTLY_MODEL,
+        model=resolve_llm_model(),
     )
 
     print("\n✅ Revisión nocturna completada.")

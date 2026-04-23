@@ -2,7 +2,36 @@
 
 > La capa de inteligencia del sistema. Orquesta, razona y actúa. Rails persiste. El Brain decide.
 
-FastAPI corriendo en Railway. Recibe mensajes de Telegram vía webhook, corre agentes Claude con tool use, y programa automatizaciones nocturnas y quincenales con APScheduler — sin GitHub Actions.
+FastAPI corriendo en Railway. Recibe mensajes de Telegram vía webhook, corre agentes LLM con tool use, y programa automatizaciones nocturnas y quincenales con APScheduler — sin GitHub Actions.
+
+## Multi-LLM Phase Status
+
+Implementado en esta fase:
+
+- abstracción mínima `LlmProviderPort`
+- provider Anthropic extraído como adapter concreto
+- provider OpenAI-compatible para GPT
+- provider OpenAI-compatible para Kimi
+- selección de provider/model por `LLM_PROVIDER` y `LLM_MODEL`
+- compatibilidad con nombres legacy `OPEN_AI_API_KEY` y `KIMI_AI_API_KEY`
+
+Validación real de esta fase:
+
+- OpenAI: probado localmente con tool calling real usando `gpt-4.1-mini`
+- Kimi: probado localmente con tool calling real usando `kimi-k2.5`
+- Anthropic: compatibilidad preservada por adapter dedicado, pero sin prueba runtime en esta iteración por falta de crédito disponible
+
+Estado operativo elegido:
+
+- provider por defecto recomendado para esta fase: `kimi`
+- modelo por defecto recomendado para esta fase: `kimi-k2.5`
+
+Límites explícitos:
+
+- no hay fallback automático entre providers
+- no hay benchmark automático
+- no hay Gemini en esta fase
+- no hay selector persistido por usuario ni UI de preferencias de modelo
 
 ## Capacidades financieras expuestas hoy
 
@@ -42,7 +71,7 @@ FastAPI — daniel15k-agents  (este repo)
 Rails API — daniel15k-api   (data layer)
 ```
 
-**Principio:** Rails no sabe nada de Claude ni de Telegram. El Brain orquesta, Rails persiste.
+**Principio:** Rails no sabe nada del provider LLM ni de Telegram. El Brain orquesta, Rails persiste.
 
 ---
 
@@ -54,16 +83,22 @@ daniel15k-agents/
 ├── scheduler.py               ← APScheduler: 3 jobs programados
 ├── ports/
 │   ├── rails_api.py           ← interfaz abstracta hacia la API de Rails
-│   └── messenger.py           ← interfaz abstracta hacia el mensajero
+│   ├── messenger.py           ← interfaz abstracta hacia el mensajero
+│   └── llm_provider.py        ← interfaz mínima del provider LLM
 ├── adapters/
 │   ├── rails_http.py          ← implementación HTTP del puerto Rails
-│   └── telegram_messenger.py  ← implementación Telegram del puerto mensajero
+│   ├── telegram_messenger.py  ← implementación Telegram del puerto mensajero
+│   ├── anthropic_llm.py       ← adapter Anthropic
+│   └── openai_compatible_llm.py ← adapter GPT/Kimi
 ├── services/
-│   └── claude_client.py       ← loop agentic: llama Claude, ejecuta tool calls
+│   ├── claude_client.py       ← wrapper legacy-compatible para Anthropic
+│   └── llm_factory.py         ← resuelve provider/model desde env
 ├── agents/
 │   └── nightly.py             ← revisión nocturna (migrado desde GitHub Actions)
 ├── flows/
 │   └── budget_wizard.py       ← máquina de estados del wizard de planificación
+├── scripts/
+│   └── smoke_llm.py           ← prueba real de provider + tool calling
 ├── routers/
 │   ├── webhook.py             ← POST /webhook/telegram
 │   └── agents.py             ← POST /agents/nightly, /agents/planning
@@ -80,7 +115,7 @@ El Brain usa ports & adapters (arquitectura hexagonal):
 
 - **Ports** (`ports/`) — interfaces abstractas. Los agentes y servicios solo conocen los ports.
 - **Adapters** (`adapters/`) — implementaciones concretas. Hoy: HTTP + Telegram. Mañana: pueden cambiar sin tocar los agentes.
-- **Services** (`services/`) — lógica transversal (loop agentic de Claude).
+- **Services** (`services/`) — wiring transversal (factory, compatibilidad, prompts).
 - **Agents** (`agents/`) — lógica de negocio de cada agente autónomo.
 - **Flows** (`flows/`) — máquinas de estado para flujos interactivos multi-paso.
 
@@ -176,11 +211,49 @@ El estado persiste entre mensajes en `PendingAction.context` (jsonb en Postgres)
 | `DANIEL15K_AGENT_TYPE` | Tipo de agente. Default: `finance_coach` |
 | `TELEGRAM_BOT_TOKEN` | Token del bot |
 | `TELEGRAM_CHAT_ID` | ID del chat personal de Daniel |
+| `LLM_PROVIDER` | Provider activo: `anthropic`, `openai` o `kimi` |
+| `LLM_MODEL` | Modelo activo del provider |
 | `ANTHROPIC_API_KEY` | API key de Anthropic |
+| `OPENAI_API_KEY` | API key estándar de OpenAI |
+| `OPEN_AI_API_KEY` | Alias legacy aceptado para OpenAI |
+| `KIMI_API_KEY` | API key estándar de Kimi |
+| `KIMI_AI_API_KEY` | Alias legacy aceptado para Kimi |
+| `CLAUDE_MODEL` | Fallback legacy para Anthropic si no defines `LLM_MODEL` |
 | `GMAIL_ADDRESS` | Correo donde llegan extractos bancarios |
 | `GMAIL_APP_PASSWORD` | App password de Google (16 chars) |
 | `INTERNAL_TOKEN` | Token para autenticar triggers manuales (`/agents/*`) |
 | `PORT` | Asignado automáticamente por Railway |
+
+Resolución efectiva:
+
+- si `LLM_PROVIDER` no está seteado, el Brain intenta resolver según keys disponibles en este orden: `kimi`, `openai`, `anthropic`
+- si `LLM_MODEL` no está seteado, usa un default seguro por provider
+- en OpenAI y Kimi se aceptan tanto nombres estándar como aliases legacy del `.env`
+
+Configuración recomendada para esta fase:
+
+```env
+LLM_PROVIDER=kimi
+LLM_MODEL=kimi-k2.5
+```
+
+Cómo probar localmente:
+
+```bash
+source .env
+./.venv/bin/python -c "from services.llm_factory import resolve_llm_provider_name, resolve_llm_model; print(resolve_llm_provider_name(), resolve_llm_model())"
+LLM_PROVIDER=openai LLM_MODEL=gpt-4.1-mini ./.venv/bin/python scripts/smoke_llm.py
+LLM_PROVIDER=kimi LLM_MODEL=kimi-k2.5 ./.venv/bin/python scripts/smoke_llm.py
+```
+
+Cómo comparar providers con el mismo brain:
+
+1. Mantén iguales prompts, tools y contexto.
+2. Cambia solo `LLM_PROVIDER` y `LLM_MODEL`.
+3. Corre el mismo `scripts/smoke_llm.py` o el mismo flujo real del Brain.
+4. Compara costo, velocidad, tool use y calidad de respuesta por logs/resultados.
+
+La selección por UI queda fuera de esta fase.
 
 ---
 
@@ -210,7 +283,7 @@ curl -X POST https://daniel15k-agents-production.up.railway.app/agents/nightly \
 railway logs --tail 100
 
 # Ver variables de entorno
-railway run printenv | grep -E "(RAILS|TELEGRAM|ANTHROPIC)"
+railway run printenv | grep -E "(RAILS|TELEGRAM|LLM_|ANTHROPIC|OPENAI|KIMI)"
 ```
 
 ---

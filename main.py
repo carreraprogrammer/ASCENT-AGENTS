@@ -11,11 +11,14 @@ import logging
 import os
 
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
 from routers import webhook, agents
 import scheduler as sched
+
+load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,

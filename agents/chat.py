@@ -5,9 +5,9 @@ from ports.messenger import MessengerPort, ParsedUpdate
 from ports.rails_api import RailsApiPort
 from services.chat_context import COLOMBIA_TZ, event_source_id, normalize_telegram_html, telegram_context
 from services.chat_preflight import detect_preflight_intent, inject_soft_nudge, run_preflight
-from services.chat_prompts import CHAT_MODEL, COMMAND_PROMPTS, HELP_TEXT, SYSTEM_PROMPT
+from services.chat_prompts import COMMAND_PROMPTS, HELP_TEXT, SYSTEM_PROMPT
 from services.chat_tools import build_tool_map, build_tools
-from services.claude_client import run_agent
+from services.llm_factory import build_llm_provider, resolve_llm_model
 
 logger = logging.getLogger(__name__)
 
@@ -54,13 +54,14 @@ def _run_conversation(
 ) -> None:
     now_col = datetime.now(COLOMBIA_TZ)
     state = {"responded": False, "mutated": False, "source_event_id": source_event_id}
-    final_text = run_agent(
+    provider = build_llm_provider()
+    final_text = provider.run_agent(
         system_prompt=SYSTEM_PROMPT,
         tools=build_tools(),
         tool_map=build_tool_map(api, messenger, now_col, state),
         initial_message=initial_message,
         max_iterations=12,
-        model=CHAT_MODEL,
+        model=resolve_llm_model(),
     )
 
     if state["responded"]:

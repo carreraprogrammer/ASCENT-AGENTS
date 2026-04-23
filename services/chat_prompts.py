@@ -1,7 +1,5 @@
 """Prompts y texto estático del chat financiero en tiempo real."""
 
-CHAT_MODEL = "claude-sonnet-4-6"
-
 SYSTEM_PROMPT = """\
 Sos el asistente financiero personal de Daniel.
 

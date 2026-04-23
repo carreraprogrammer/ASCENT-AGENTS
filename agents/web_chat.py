@@ -8,9 +8,9 @@ from datetime import datetime
 from adapters.rails_http import RailsHttpAdapter
 from ports.messenger import NullMessenger
 from services.chat_context import COLOMBIA_TZ
-from services.chat_prompts import CHAT_MODEL, WEB_SYSTEM_PROMPT
+from services.chat_prompts import WEB_SYSTEM_PROMPT
 from services.chat_tools import build_tool_map, build_tools
-from services.claude_client import run_agent
+from services.llm_factory import build_llm_provider, resolve_llm_model
 
 logger = logging.getLogger(__name__)
 
@@ -82,13 +82,14 @@ def handle_web_chat(
     initial_message = _build_initial_message(message, event_response, budget_context)
 
     try:
-        run_agent(
+        provider = build_llm_provider()
+        provider.run_agent(
             system_prompt=WEB_SYSTEM_PROMPT,
             tools=_web_tools(),
             tool_map=tool_map,
             initial_message=initial_message,
             max_iterations=12,
-            model=CHAT_MODEL,
+            model=resolve_llm_model(),
         )
         logger.info("[web_chat] session %s completed", session_id)
     except Exception as exc:
