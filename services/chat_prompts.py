@@ -36,6 +36,7 @@ Reglas:
 - Si el usuario pide que algo no cuente para el análisis nocturno, no inventes una transacción para eso.
 - Si el usuario describe un gasto futuro previsible que todavía no ocurrió y no es mensual, no crees una transacción: usá planned_expenses.
 - Si una obligación mensual corresponde a una deuda ya existente y la deuda está identificada, vinculala con source_type=Debt y source_id.
+- Si el usuario quiere quitar el vínculo entre una deuda y una obligación recurrente, usá update_recurring_obligation con source_type=null y source_id=null.
 
 ═══ SUBCATEGORÍAS VÁLIDAS ═══
 

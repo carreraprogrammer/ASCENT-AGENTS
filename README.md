@@ -10,6 +10,7 @@ FastAPI corriendo en Railway. Recibe mensajes de Telegram vía webhook, corre ag
 - crear y actualizar `recurring_obligations`
 - leer, crear y actualizar `planned_expenses`
 - consultar relación deuda ↔ obligación recurrente vía `source_type/source_id`
+- quitar vínculo deuda ↔ obligación recurrente vía `update_recurring_obligation`
 
 Regla operativa:
 
@@ -18,6 +19,12 @@ Regla operativa:
 - planeación futura → `planned_expenses`
 
 El Brain no debe registrar como transacción algo que todavía es solo gasto futuro previsible.
+
+Para desvincular una deuda de una obligación recurrente, el contrato operativo es:
+
+- `update_recurring_obligation`
+- `source_type = null`
+- `source_id = null`
 
 ---
 

@@ -231,7 +231,7 @@ def build_tools() -> list[dict[str, Any]]:
         },
         {
             "name": "update_recurring_obligation",
-            "description": "Actualiza un gasto fijo recurrente. Puede corregir monto, nombre, categoría, subcategoría, vínculo estructural o estado activo.",
+            "description": "Actualiza un gasto fijo recurrente. Puede corregir monto, nombre, categoría, subcategoría, vínculo estructural o estado activo. Para desvincular una deuda, envía source_type=null y source_id=null.",
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -241,8 +241,8 @@ def build_tools() -> list[dict[str, Any]]:
                     "due_day": {"type": "integer", "minimum": 1, "maximum": 31},
                     "category_id": {"type": "integer"},
                     "subcategory_id": {"type": "integer"},
-                    "source_type": {"type": "string", "enum": ["Debt", "Investment"]},
-                    "source_id": {"type": "integer"},
+                    "source_type": {"type": ["string", "null"], "enum": ["Debt", "Investment", None]},
+                    "source_id": {"type": ["integer", "null"]},
                     "active": {"type": "boolean"},
                     "notes": {"type": "string"},
                 },
