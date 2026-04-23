@@ -68,6 +68,7 @@ def _run_conversation(
         return
 
     if final_text:
+        logger.warning("[chat_agent] provider returned direct text without send_telegram tool")
         messenger.send_message(normalize_telegram_html(final_text))
         return
 

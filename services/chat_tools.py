@@ -456,9 +456,16 @@ def build_tools() -> list[dict[str, Any]]:
 def _send_telegram(messenger: MessengerPort, payload: dict) -> dict:
     message = payload.get("message") or payload.get("mensaje") or ""
     normalized = normalize_telegram_html(message)
+    button_rows = payload.get("inline_keyboard") or []
 
-    if payload.get("inline_keyboard"):
-        messenger.send_with_buttons(normalized, payload["inline_keyboard"])
+    logger.info(
+        "[chat_agent] send_telegram message_len=%d button_rows=%d",
+        len(normalized),
+        len(button_rows),
+    )
+
+    if button_rows:
+        messenger.send_with_buttons(normalized, button_rows)
     else:
         messenger.send_message(normalized)
 
@@ -575,7 +582,39 @@ def build_tool_map(
         if metadata:
             payload["metadata"] = metadata
 
-        return _post("/api/v1/transactions", payload)
+        logger.info(
+            "[chat_agent] create_transaction amount=%s concept=%s date=%s source=%s source_event_id=%s",
+            payload.get("amount"),
+            payload.get("concept"),
+            payload.get("date"),
+            payload.get("source"),
+            metadata.get("source_event_id"),
+        )
+
+        try:
+            return _post("/api/v1/transactions", payload)
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 409:
+                raise
+
+            try:
+                data = exc.response.json()
+            except ValueError:
+                data = {}
+
+            duplicate_result = {
+                "ok": True,
+                "duplicate": True,
+                "already_recorded": True,
+                "existing_id": data.get("existing_id"),
+                "detail": ((data.get("errors") or [{}])[0]).get("detail") or "Duplicate transaction",
+            }
+            logger.info(
+                "[chat_agent] create_transaction duplicate existing_id=%s detail=%s",
+                duplicate_result["existing_id"],
+                duplicate_result["detail"],
+            )
+            return duplicate_result
 
     def _trigger_fc_wizard(_: dict) -> dict:
         from flows import financial_context_wizard
