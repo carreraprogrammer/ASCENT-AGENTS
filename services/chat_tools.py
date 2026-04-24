@@ -94,6 +94,40 @@ def build_tools() -> list[dict[str, Any]]:
             "input_schema": {"type": "object", "properties": {}, "required": []},
         },
         {
+            "name": "create_transactions",
+            "description": (
+                "Crea múltiples transacciones en una sola llamada. "
+                "Usá este tool cuando el mensaje mencione 2 o más gastos o ingresos con montos distintos. "
+                "Más eficiente que llamar create_transaction varias veces."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "transactions": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "date": {"type": "string"},
+                                "concept": {"type": "string"},
+                                "product": {"type": "string"},
+                                "amount": {"type": "integer"},
+                                "transaction_type": {"type": "string", "enum": ["expense", "income"]},
+                                "status": {"type": "string", "enum": ["confirmed", "pending"]},
+                                "category_id": {"type": "integer"},
+                                "subcategory_id": {"type": "integer"},
+                                "category_code": {"type": "string"},
+                                "subcategory_code": {"type": "string"},
+                                "source": {"type": "string", "enum": ["telegram", "gmail", "manual"]},
+                            },
+                            "required": ["date", "concept", "amount", "transaction_type", "status"],
+                        },
+                    }
+                },
+                "required": ["transactions"],
+            },
+        },
+        {
             "name": "create_transaction",
             "description": (
                 "Crea una transacción. Para Telegram usa source=telegram. "
@@ -480,7 +514,7 @@ def build_tool_map(
 ) -> dict[str, Any]:
     month, year = now.month, now.year
     today = now.date()
-    state = state or {"responded": False, "mutated": False, "source_event_id": None}
+    state = state or {"responded": False, "mutated": False, "source_event_id": None, "transaction_index": 0}
 
     def _patch(path: str, body: dict) -> dict:
         response = httpx.patch(
@@ -572,27 +606,34 @@ def build_tool_map(
         recent = flattened[:limit]
         return {"transactions": recent, "total": len(recent), "days": days}
 
-    def _create_transaction(input_data: dict) -> dict:
-        payload = dict(input_data)
+    def _inject_source_event_id(payload: dict) -> dict:
+        """Inyecta source_event_id indexado para idempotencia por posición dentro del mensaje."""
         metadata = dict(payload.get("metadata") or {})
-
         if payload.get("source") == "telegram" and state.get("source_event_id"):
-            metadata["source_event_id"] = state["source_event_id"]
-
+            idx = state.get("transaction_index", 0)
+            metadata["source_event_id"] = f"{state['source_event_id']}:{idx}"
+            state["transaction_index"] = idx + 1
         if metadata:
-            payload["metadata"] = metadata
+            payload = {**payload, "metadata": metadata}
+        return payload
+
+    def _create_transaction(input_data: dict) -> dict:
+        payload = _inject_source_event_id(dict(input_data))
+        source_event_id = (payload.get("metadata") or {}).get("source_event_id")
 
         logger.info(
-            "[chat_agent] create_transaction amount=%s concept=%s date=%s source=%s source_event_id=%s",
+            "[chat_agent] create_transaction amount=%s concept=%s date=%s source=%s event_id=%s",
             payload.get("amount"),
             payload.get("concept"),
             payload.get("date"),
             payload.get("source"),
-            metadata.get("source_event_id"),
+            source_event_id,
         )
 
         try:
-            return _post("/api/v1/transactions", payload)
+            result = _post("/api/v1/transactions", payload)
+            logger.info("[chat_agent] create_transaction OK id=%s", result.get("id") if isinstance(result, dict) else "?")
+            return result
         except httpx.HTTPStatusError as exc:
             if exc.response.status_code != 409:
                 raise
@@ -610,11 +651,48 @@ def build_tool_map(
                 "detail": ((data.get("errors") or [{}])[0]).get("detail") or "Duplicate transaction",
             }
             logger.info(
-                "[chat_agent] create_transaction duplicate existing_id=%s detail=%s",
+                "[chat_agent] create_transaction DUPLICATE existing_id=%s",
                 duplicate_result["existing_id"],
-                duplicate_result["detail"],
             )
             return duplicate_result
+
+    def _create_transactions(input_data: dict) -> dict:
+        transactions = input_data.get("transactions", [])
+        logger.info("[chat_agent] create_transactions batch_size=%d", len(transactions))
+
+        prepared = []
+        for txn in transactions:
+            prepared.append(_inject_source_event_id(dict(txn)))
+
+        for i, txn in enumerate(prepared):
+            logger.info(
+                "[chat_agent]   [%d/%d] amount=%s concept=%s date=%s event_id=%s",
+                i + 1, len(prepared),
+                txn.get("amount"), txn.get("concept"), txn.get("date"),
+                (txn.get("metadata") or {}).get("source_event_id"),
+            )
+
+        response = httpx.post(
+            f"{API_URL}/api/v1/transactions/batch",
+            headers=build_auth_headers(),
+            json={"transactions": prepared},
+            timeout=30,
+        )
+        response.raise_for_status()
+        state["mutated"] = True
+        result = response.json()
+
+        created = result.get("data", [])
+        errors  = result.get("errors", [])
+        logger.info(
+            "[chat_agent] create_transactions DONE created=%d errors=%d",
+            len(created), len(errors),
+        )
+        if errors:
+            for err in errors:
+                logger.warning("[chat_agent]   error index=%s detail=%s", err.get("index"), err.get("detail"))
+
+        return {"created": len(created), "errors": len(errors), "transactions": created}
 
     def _trigger_fc_wizard(_: dict) -> dict:
         from flows import financial_context_wizard
@@ -655,6 +733,7 @@ def build_tool_map(
         "get_income_sources": lambda _: api.get_income_sources(),
         "get_recurring_obligations": lambda _: api.get_recurring_obligations(),
         "get_planned_expenses": lambda _: api.get_planned_expenses(),
+        "create_transactions": _create_transactions,
         "create_transaction": _create_transaction,
         "update_transaction": lambda p: _patch(f"/api/v1/transactions/{p.pop('id')}", p),
         "delete_transaction": lambda p: _delete(f"/api/v1/transactions/{p['id']}"),
