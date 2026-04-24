@@ -16,7 +16,8 @@ research/
 | Fecha | Modelo | Proveedor | Veredicto |
 |---|---|---|---|
 | 2026-04-23 | kimi-k2.6 | Moonshot AI | ❌ Alucinación + retry loop |
-| — | gpt-4.1-mini | OpenAI | En evaluación |
+| 2026-04-24 | deepseek-chat (V3) | DeepSeek | ⚠️ Alucinación persiste, 409 mejor que Kimi |
+| 2026-04-24 | gpt-4.1-mini | OpenAI | ✅ Mejor candidato — fecha correcta, send_telegram siempre, 409 limpio |
 
 ## Convenciones
 
