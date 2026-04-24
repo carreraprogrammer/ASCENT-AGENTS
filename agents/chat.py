@@ -93,10 +93,15 @@ def handle_command(api: RailsApiPort, messenger: MessengerPort, parsed: ParsedUp
         return
 
     try:
+        now_col = datetime.now(COLOMBIA_TZ)
+        date_context = (
+            f"Fecha actual en Colombia: {now_col.strftime('%d/%m/%Y')}\n"
+            f"Mes actual: {now_col.month}, año actual: {now_col.year}\n"
+        )
         initial_message = _apply_preflight(
             api,
             messenger,
-            initial_message=COMMAND_PROMPTS[command],
+            initial_message=date_context + COMMAND_PROMPTS[command],
             command=command,
             text=parsed.text,
         )
