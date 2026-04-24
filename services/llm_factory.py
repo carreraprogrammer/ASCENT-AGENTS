@@ -15,9 +15,11 @@ DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-4-6",
     "openai": "gpt-4.1-mini",
     "kimi": "kimi-k2.6",
+    "deepseek": "deepseek-chat",
 }
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 KIMI_BASE_URL = "https://api.moonshot.ai/v1"
+DEEPSEEK_BASE_URL = "https://api.deepseek.com/v1"
 
 
 def _env_first(*names: str) -> str:
@@ -33,6 +35,8 @@ def resolve_llm_provider_name() -> str:
     if configured:
         return configured
 
+    if _env_first("DEEPSEEK_API_KEY", "DEEPSEEK_AI_API_KEY"):
+        return "deepseek"
     if _env_first("KIMI_API_KEY", "KIMI_AI_API_KEY"):
         return "kimi"
     if _env_first("OPENAI_API_KEY", "OPEN_AI_API_KEY"):
@@ -85,4 +89,12 @@ def build_llm_provider() -> LlmProviderPort:
             default_model=resolve_llm_model(),
         )
 
-    raise ValueError(f"Unsupported LLM_PROVIDER '{provider}'. Use anthropic, openai or kimi.")
+    if provider == "deepseek":
+        return OpenAICompatibleLlmProvider(
+            _env_first("DEEPSEEK_API_KEY", "DEEPSEEK_AI_API_KEY"),
+            provider_name="deepseek",
+            base_url=_env_first("DEEPSEEK_BASE_URL") or DEEPSEEK_BASE_URL,
+            default_model=resolve_llm_model(),
+        )
+
+    raise ValueError(f"Unsupported LLM_PROVIDER '{provider}'. Use anthropic, openai, kimi or deepseek.")
