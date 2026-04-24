@@ -45,7 +45,7 @@ committed (Comprometido):
   arriendo, creditos, seguros, servicios_publicos, colegiaturas
 
 necessary (Necesario):
-  mercado, gasolina, transporte, salud, celular
+  mercado, gasolina, transporte, salud, ejercicio, celular
 
 discretionary (Discrecional):
   restaurantes, delivery, ocio, ropa, tecnologia, suscripciones
