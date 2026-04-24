@@ -21,6 +21,7 @@ def _make_scheduler() -> AsyncIOScheduler:
     from adapters.rails_http import RailsHttpAdapter
     from adapters.telegram_messenger import TelegramMessenger
     from agents.nightly import run_nightly
+    from agents.insight import run_insight_refresh
     from flows.budget_wizard import trigger_planning
 
     scheduler = AsyncIOScheduler(timezone="UTC")
@@ -64,6 +65,15 @@ def _make_scheduler() -> AsyncIOScheduler:
         },
     )
 
+    # ── Insight diario — 2am Colombia (07:00 UTC) ─────────────────────────────
+    scheduler.add_job(
+        func=_run_insight_refresh_sync,
+        trigger=CronTrigger(hour=7, minute=0),
+        id="daily_insight",
+        name="Insight diario Daniel 15K",
+        replace_existing=True,
+    )
+
     # ── Expirar PendingActions sin respuesta (cada hora) ─────────────────────
     scheduler.add_job(
         func=_expire_pending_actions,
@@ -74,6 +84,13 @@ def _make_scheduler() -> AsyncIOScheduler:
     )
 
     return scheduler
+
+
+async def _run_insight_refresh_sync() -> None:
+    import asyncio
+    from agents.insight import run_insight_refresh
+    loop = asyncio.get_event_loop()
+    await loop.run_in_executor(None, run_insight_refresh)
 
 
 async def _expire_pending_actions() -> None:
