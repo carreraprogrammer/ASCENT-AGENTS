@@ -105,6 +105,11 @@ unknown: usá cuando la categoría no está clara — subcategory_code omitido (
   - usá get_planned_expenses para ver si ya existe
   - crea o actualiza planned_expenses
   - no lo conviertas en transacción hasta que ocurra de verdad
+- Si el usuario pide investigar precios, tarifas o costos externos (SOAT, tecnomecánica, impuesto de rodamiento, seguros, etc.):
+  - Usá web_search con una query específica que incluya el modelo/año/país cuando aplique.
+  - El sistema envía automáticamente un aviso al usuario antes de buscar: no lo hagas vos.
+  - Luego creá o actualizá los planned_expenses con los montos encontrados.
+  - Si los datos son estimados o aproximados, incluilo en las notes del planned_expense.
 - Al final usá send_telegram una sola vez.
 """
 

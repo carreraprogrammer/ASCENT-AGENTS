@@ -12,6 +12,7 @@ from adapters.rails_http import BASE_URL as API_BASE_URL, build_auth_headers
 from ports.messenger import MessengerPort
 from ports.rails_api import RailsApiPort
 from services.chat_context import flatten_transaction, normalize_telegram_html, parse_api_date
+from services.web_search import web_search as _web_search_http
 
 logger = logging.getLogger(__name__)
 API_URL = API_BASE_URL
@@ -456,6 +457,25 @@ def build_tools() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "web_search",
+            "description": (
+                "Busca en internet. Úsalo para investigar precios, tarifas, costos de "
+                "servicios externos (SOAT, tecnomecánica, impuestos, seguros) o cualquier "
+                "información que no esté disponible en la API. Antes de llamarlo en Telegram "
+                "podés enviar un mensaje de espera con send_telegram."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Término de búsqueda. Sé específico: incluí país, año y modelo si aplica.",
+                    },
+                },
+                "required": ["query"],
+            },
+        },
+        {
             "name": "send_telegram",
             "description": (
                 "Envía la respuesta final. Soporta inline_keyboard. "
@@ -487,7 +507,7 @@ def build_tools() -> list[dict[str, Any]]:
     ]
 
 
-def _send_telegram(messenger: MessengerPort, payload: dict) -> dict:
+def _send_telegram(messenger: MessengerPort, payload: dict, state: dict | None = None) -> dict:
     message = payload.get("message") or payload.get("mensaje") or ""
     normalized = normalize_telegram_html(message)
     button_rows = payload.get("inline_keyboard") or []
@@ -502,6 +522,9 @@ def _send_telegram(messenger: MessengerPort, payload: dict) -> dict:
         messenger.send_with_buttons(normalized, button_rows)
     else:
         messenger.send_message(normalized)
+
+    if state is not None and normalized:
+        state["last_response"] = normalized
 
     return {"ok": True}
 
@@ -694,6 +717,17 @@ def build_tool_map(
 
         return {"created": len(created), "errors": len(errors), "transactions": created}
 
+    def _web_search_with_notice(input_data: dict) -> dict:
+        query = input_data.get("query", "")
+        logger.info("[chat_agent] web_search query=%r", query)
+        messenger.send_message("🔍 Regalame un momento, estoy investigando...")
+        try:
+            result = _web_search_http(query)
+            return result
+        except Exception as exc:
+            logger.error("[chat_agent] web_search failed: %s", exc)
+            return {"error": str(exc), "results": []}
+
     def _trigger_fc_wizard(_: dict) -> dict:
         from flows import financial_context_wizard
 
@@ -751,5 +785,6 @@ def build_tool_map(
         "create_income_source": lambda p: _post("/api/v1/income_sources", p),
         "update_income_source": lambda p: _patch(f"/api/v1/income_sources/{p.pop('id')}", p),
         "delete_income_source": lambda p: _delete(f"/api/v1/income_sources/{p['id']}"),
-        "send_telegram": lambda p: state.update({"responded": True}) or _send_telegram(messenger, p),
+        "web_search": _web_search_with_notice,
+        "send_telegram": lambda p: state.update({"responded": True}) or _send_telegram(messenger, p, state),
     }

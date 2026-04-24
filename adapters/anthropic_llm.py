@@ -29,8 +29,12 @@ class AnthropicLlmProvider(LlmProviderPort):
         initial_message: str,
         max_iterations: int = 20,
         model: str | None = None,
+        prior_messages: list[dict] | None = None,
     ) -> str:
-        messages = [{"role": "user", "content": initial_message}]
+        messages = [
+            *(prior_messages or []),
+            {"role": "user", "content": initial_message},
+        ]
 
         for i in range(max_iterations):
             response = self._client.messages.create(

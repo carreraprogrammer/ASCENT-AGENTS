@@ -15,5 +15,6 @@ class LlmProviderPort(ABC):
         initial_message: str,
         max_iterations: int = 20,
         model: str | None = None,
+        prior_messages: list[dict] | None = None,
     ) -> str:
         raise NotImplementedError

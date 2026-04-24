@@ -7,6 +7,7 @@ from services.chat_context import COLOMBIA_TZ, event_source_id, normalize_telegr
 from services.chat_preflight import detect_preflight_intent, inject_soft_nudge, run_preflight
 from services.chat_prompts import COMMAND_PROMPTS, HELP_TEXT, SYSTEM_PROMPT
 from services.chat_tools import build_tool_map, build_tools
+from services.conversation_store import append_history, get_history
 from services.llm_factory import build_llm_provider, resolve_llm_model
 
 logger = logging.getLogger(__name__)
@@ -51,9 +52,16 @@ def _run_conversation(
     messenger: MessengerPort,
     initial_message: str,
     source_event_id: str | None = None,
-) -> None:
+    prior_messages: list[dict] | None = None,
+) -> str | None:
+    """Returns the assistant's final response text (for conversation history), or None."""
     now_col = datetime.now(COLOMBIA_TZ)
-    state = {"responded": False, "mutated": False, "source_event_id": source_event_id}
+    state = {
+        "responded": False,
+        "mutated": False,
+        "source_event_id": source_event_id,
+        "last_response": None,
+    }
     provider = build_llm_provider()
     final_text = provider.run_agent(
         system_prompt=SYSTEM_PROMPT,
@@ -62,21 +70,23 @@ def _run_conversation(
         initial_message=initial_message,
         max_iterations=12,
         model=resolve_llm_model(),
+        prior_messages=prior_messages,
     )
 
     if state["responded"]:
-        return
+        return state["last_response"]
 
     if final_text:
         logger.warning("[chat_agent] provider returned direct text without send_telegram tool")
         messenger.send_message(normalize_telegram_html(final_text))
-        return
+        return final_text
 
     if state["mutated"]:
         messenger.send_message("✅ Listo.")
-        return
+        return None
 
     messenger.send_message("⚠️ No pude cerrar bien la respuesta. Intentá de nuevo.")
+    return None
 
 
 def handle_command(api: RailsApiPort, messenger: MessengerPort, parsed: ParsedUpdate) -> None:
@@ -114,10 +124,15 @@ def handle_command(api: RailsApiPort, messenger: MessengerPort, parsed: ParsedUp
         messenger.send_message("❌ Tuve un problema. Intentá de nuevo.")
 
 
+CONVERSATION_KEY = "telegram"
+
+
 def handle_message(api: RailsApiPort, messenger: MessengerPort, parsed: ParsedUpdate) -> None:
     text = (parsed.text or "").strip()
     if not text:
         return
+
+    prior_messages = get_history(CONVERSATION_KEY)
 
     initial_message = (
         "Mensaje nuevo de Daniel en Telegram. "
@@ -139,7 +154,13 @@ def handle_message(api: RailsApiPort, messenger: MessengerPort, parsed: ParsedUp
         if initial_message is None:
             return
 
-        _run_conversation(api, messenger, initial_message, source_event_id=event_source_id(parsed))
+        response = _run_conversation(
+            api, messenger, initial_message,
+            source_event_id=event_source_id(parsed),
+            prior_messages=prior_messages or None,
+        )
+        if response:
+            append_history(CONVERSATION_KEY, text, response)
     except Exception as exc:
         logger.error("[chat_agent] realtime error: %s", exc, exc_info=True)
         messenger.send_message("❌ No pude procesar eso. Intentá de nuevo.")

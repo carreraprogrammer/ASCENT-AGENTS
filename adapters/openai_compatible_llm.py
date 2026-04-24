@@ -68,9 +68,11 @@ class OpenAICompatibleLlmProvider(LlmProviderPort):
         initial_message: str,
         max_iterations: int = 20,
         model: str | None = None,
+        prior_messages: list[dict] | None = None,
     ) -> str:
         messages: list[dict] = [
             {"role": "system", "content": system_prompt},
+            *(prior_messages or []),
             {"role": "user", "content": initial_message},
         ]
         tool_defs = _to_openai_tools(tools)
