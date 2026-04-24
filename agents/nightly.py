@@ -242,6 +242,22 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort) -> dict:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def settle_credit_card_payments(inp: dict) -> dict:
+        """Liquida transacciones de tarjeta de crédito pendientes en orden FIFO."""
+        import httpx
+        amount = inp.get("amount", 0)
+        try:
+            r = httpx.post(
+                f"{API_BASE_URL}/api/v1/transactions/settle_credit_card",
+                headers=build_auth_headers(),
+                json={"amount": amount},
+                timeout=15,
+            )
+            r.raise_for_status()
+            return {"ok": True, **r.json().get("data", {})}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def send_telegram(inp: dict) -> dict:
         try:
             if "inline_keyboard" in inp:
@@ -271,17 +287,18 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort) -> dict:
             return {"ok": False, "error": str(e)}
 
     return {
-        "get_completeness":         get_completeness,
-        "get_telegram_messages":    get_telegram_messages,
-        "get_gmail_emails":         get_gmail_emails,
-        "get_transactions":         get_transactions,
-        "get_balance":              get_balance,
-        "get_pending_transactions": get_pending_transactions,
-        "get_summary":              get_summary,
-        "create_transaction":       create_transaction,
-        "update_transaction":       update_transaction,
-        "send_telegram":            send_telegram,
-        "send_poll":                send_poll,
+        "get_completeness":              get_completeness,
+        "get_telegram_messages":         get_telegram_messages,
+        "get_gmail_emails":              get_gmail_emails,
+        "get_transactions":              get_transactions,
+        "get_balance":                   get_balance,
+        "get_pending_transactions":      get_pending_transactions,
+        "get_summary":                   get_summary,
+        "create_transaction":            create_transaction,
+        "update_transaction":            update_transaction,
+        "settle_credit_card_payments":   settle_credit_card_payments,
+        "send_telegram":                 send_telegram,
+        "send_poll":                     send_poll,
     }
 
 
@@ -424,6 +441,22 @@ TOOLS = [
                 },
             },
             "required": ["mensaje"],
+        },
+    },
+    {
+        "name": "settle_credit_card_payments",
+        "description": (
+            "Liquida compras de tarjeta de crédito pendientes de pago al banco. "
+            "Llamar cuando Gmail detecta un abono/pago a TC. "
+            "Nunca crear una transacción de gasto para un abono a TC — usar este tool en su lugar. "
+            "Marca las compras pendientes como pagadas en orden FIFO hasta agotar el monto del abono."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "amount": {"type": "integer", "description": "Monto del abono en COP (entero positivo)"},
+            },
+            "required": ["amount"],
         },
     },
     {
@@ -573,12 +606,14 @@ unknown: usá cuando la categoría no está clara — subcategory_code = null
 - El usuario siempre puede cambiar la clasificación después
 
 ═══ REGLA CRÍTICA — PAGOS A TARJETA DE CRÉDITO ═══
-Cuando Gmail muestra "Abono TC", "Pago TC", "Pago tarjeta", "Pago mínimo":
-- Es un movimiento de caja — las compras individuales YA están registradas
-- Registrar como: transaction_type=expense, subcategory_code=creditos, product=debito, status=confirmed
-- Concepto: "Pago TC Viajes" o "Pago TC Davivienda"
-- NUNCA descomponer el abono en compras individuales
-- NUNCA duplicar compras ya existentes
+Cuando Gmail muestra "Abono TC", "Pago TC", "Pago tarjeta", "Pago mínimo", "se han abonado":
+- NO crear transacción de gasto — las compras individuales ya están registradas con payment_source=credit_card
+- Extraer el monto del abono del email (número en COP)
+- Llamar settle_credit_card_payments(amount=monto_del_abono)
+- El sistema marcará como pagadas las compras más antiguas pendientes en orden FIFO
+- Reportar en el resumen: "Abono de $X a TC — N compras saldadas, quedan $Y pendientes"
+- Si settled_count == 0: "No había compras de TC pendientes registradas en el sistema"
+- NUNCA crear un gasto por el abono, NUNCA descomponer el abono en compras individuales
 
 ═══ DEDUPLICACIÓN ═══
 1. Telegram + Gmail mismo gasto → registrar UNA sola vez
