@@ -57,10 +57,16 @@ def _should_refresh(current: dict, last_insight: dict | None, today: datetime) -
     if abs(current.get("safe_to_deploy", 0) - snap.get("safe_to_deploy", 0)) > DEPLOY_DRIFT_THRESHOLD:
         return True, "deploy_drift"
 
+    # New milestone since last insight → always refresh
+    last_generated_at = last_insight.get("generated_at", "")
+    last_milestone_at = current.get("last_milestone_at", "")
+    if last_milestone_at and last_milestone_at > last_generated_at:
+        return True, "new_milestone"
+
     return False, "stable"
 
 
-def _extract_current_state(summary: dict) -> dict:
+def _extract_current_state(summary: dict, milestones: list[dict]) -> dict:
     liquidity  = summary.get("liquidity") or {}
     balance    = summary.get("balance", {})
     burn_rate  = summary.get("burn_rate") or {}
@@ -75,12 +81,16 @@ def _extract_current_state(summary: dict) -> dict:
         c["category"] for c in categories if c.get("on_track")
     ]
 
+    last_milestone = milestones[0] if milestones else None
+
     return {
         "confirmed_balance":    confirmed_balance,
         "safe_to_deploy":       safe_to_deploy,
         "categories_on_track":  categories_on_track,
         "period_month":         now_col.month,
         "period_year":          now_col.year,
+        "last_milestone_code":  last_milestone["code"] if last_milestone else None,
+        "last_milestone_at":    last_milestone["achieved_at"] if last_milestone else None,
     }
 
 
@@ -95,6 +105,22 @@ def _get_summary(month: int, year: int) -> dict:
     )
     r.raise_for_status()
     return r.json()
+
+
+def _get_milestones(limit: int = 5) -> list[dict]:
+    try:
+        r = httpx.get(
+            f"{BASE_URL}/api/v1/milestones",
+            headers=build_auth_headers(),
+            timeout=15,
+        )
+        r.raise_for_status()
+        data = r.json()
+        items = data if isinstance(data, list) else data.get("data", [])
+        return items[:limit]
+    except Exception as exc:
+        logger.warning("[insight] milestones fetch failed: %s", exc)
+        return []
 
 
 def _get_current_insight(month: int, year: int) -> dict | None:
@@ -158,7 +184,13 @@ recommended action contradicts current liquidity."""
         return False
 
 
-def _sonnet_generate(client: anthropic.Anthropic, summary: dict, last_insight: dict | None, trigger_reason: str) -> dict:
+def _sonnet_generate(
+    client: anthropic.Anthropic,
+    summary: dict,
+    last_insight: dict | None,
+    trigger_reason: str,
+    milestones: list[dict] | None = None,
+) -> dict:
     """Ask Sonnet to generate a structured financial insight."""
     liquidity  = summary.get("liquidity") or {}
     ctx        = summary.get("financial_context") or {}
@@ -169,10 +201,21 @@ def _sonnet_generate(client: anthropic.Anthropic, summary: dict, last_insight: d
     if last_insight:
         prev_block = f"\nPrevious insight (now outdated — trigger: {trigger_reason}):\n{json.dumps(last_insight.get('recommendations', {}), ensure_ascii=False)}\n"
 
+    milestones_block = ""
+    if milestones:
+        lines = []
+        for m in milestones[:5]:
+            date_str = (m.get("achieved_at") or "")[:10]
+            meta = m.get("metadata") or {}
+            meta_str = f" ({', '.join(f'{k}={v}' for k, v in meta.items())})" if meta else ""
+            lines.append(f"- {m['code']} on {date_str}{meta_str}")
+        milestones_block = "\nRECENT MILESTONES (most recent first):\n" + "\n".join(lines) + "\n"
+
     system = """You are a responsible personal finance advisor for el usuario.
 Generate a structured financial insight with a STRICT guardrail: never recommend deploying more than safe_to_deploy.
 If safe_to_deploy is 0, the primary action must be about covering next-cycle obligations first.
 Priority order: cash flow > quality of life > debt payoff > savings goals.
+When recent milestones are present, reference them in signals with type "ok" — be specific and encouraging without being generic.
 Respond ONLY with a valid JSON object — no prose, no markdown."""
 
     user = f"""Financial state for {datetime.now(COLOMBIA_TZ).strftime('%B %Y')}:
@@ -196,7 +239,7 @@ BURN RATE:
 DEBTS:
 - total_balance: {debts.get('total_balance', 0):,} COP
 - monthly_payments: {debts.get('monthly_payments', 0):,} COP
-{prev_block}
+{milestones_block}{prev_block}
 Generate a JSON insight with this exact structure:
 {{
   "still_valid": false,
@@ -206,7 +249,7 @@ Generate a JSON insight with this exact structure:
     "rationale": "2-3 sentences explaining why this is the right move given current cash flow."
   }},
   "signals": [
-    {{"type": "warn|info|ok", "category": "category_name", "message": "short observation"}}
+    {{"type": "warn|info|ok", "category": "category_name or milestone", "message": "short observation"}}
   ],
   "reasoning": "Full internal reasoning. Honest, specific, no fluff."
 }}"""
@@ -237,7 +280,8 @@ def run_insight_refresh(*, trigger: str = "scheduled") -> None:
 
     summary      = _get_summary(month, year)
     last_insight = _get_current_insight(month, year)
-    current      = _extract_current_state(summary)
+    milestones   = _get_milestones()
+    current      = _extract_current_state(summary, milestones)
 
     should, reason = _should_refresh(current, last_insight, now_col)
 
@@ -259,7 +303,7 @@ def run_insight_refresh(*, trigger: str = "scheduled") -> None:
             logger.info("[insight] Haiku confirmed previous insight still valid — skipping.")
             return
 
-    result = _sonnet_generate(client, summary, last_insight, reason)
+    result = _sonnet_generate(client, summary, last_insight, reason, milestones)
 
     safe_to_deploy = (summary.get("liquidity") or {}).get("safe_to_deploy", 0)
 
