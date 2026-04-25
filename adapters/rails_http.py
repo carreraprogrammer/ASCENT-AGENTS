@@ -254,3 +254,13 @@ class RailsHttpAdapter(RailsApiPort):
 
     def update_planned_expense(self, planned_expense_id: int | str, **attrs) -> dict:
         return self._patch(f"/api/v1/planned_expenses/{planned_expense_id}", attrs)
+
+    # --- milestones ---
+
+    def get_milestones(self) -> list[dict]:
+        data = self._get("/api/v1/milestones")
+        return data if isinstance(data, list) else data.get("data", [])
+
+    def create_milestone(self, code: str, metadata: dict) -> dict:
+        result = self._post("/api/v1/milestones", {"code": code, "metadata": metadata or {}})
+        return result.get("data", result) if isinstance(result, dict) else result

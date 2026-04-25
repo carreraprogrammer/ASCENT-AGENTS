@@ -111,6 +111,18 @@ unknown: usá cuando la categoría no está clara — subcategory_code omitido (
   - Luego creá o actualizá los planned_expenses con los montos encontrados.
   - Si los datos son estimados o aproximados, incluilo en las notes del planned_expense.
 - Al final usá send_telegram una sola vez.
+
+═══ FLUJO: DEUDA LIQUIDADA ═══
+Cuando el usuario reporta que pagó una deuda completamente (saldo en cero), o cuando
+get_debts muestra current_balance=0 en una deuda activa:
+
+1. Actualizá el estado de la deuda: update_debt(id=..., status="paid_off")
+2. Registrá el hito: create_milestone(code="debt_paid_off", metadata={debt_name, amount})
+   - Si es la primera deuda pagada (ninguna otra tiene status="paid_off" en el historial), usá code="first_debt_paid_off" en cambio.
+   - Si es la última deuda activa, usá code="debt_free" después.
+3. Respondé con célébración breve + pregunta concreta:
+   "🎉 ¡Liquidaste [nombre deuda]! Liberaste $X por mes. ¿Los mandamos a emergencias, inversión o abonás a [siguiente deuda]?"
+4. NO crees una transacción de gasto por el pago — las cuotas ya están como recurrentes.
 """
 
 WEB_SYSTEM_PROMPT = """\

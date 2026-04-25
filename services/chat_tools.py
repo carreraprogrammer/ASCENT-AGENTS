@@ -291,6 +291,36 @@ def build_tools() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "create_milestone",
+            "description": (
+                "Registra un hito del usuario (logro o setback). "
+                "Úsalo SIEMPRE después de marcar una deuda como paid_off, "
+                "o cuando el usuario reporte un evento financiero significativo."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "enum": [
+                            "debt_paid_off", "first_debt_paid_off", "debt_free",
+                            "emergency_fund_reached", "first_monthly_plan",
+                            "three_months_planned", "investment_started",
+                            "month_positive_balance", "discretionary_under_budget",
+                            "overflow_deployed", "new_debt_acquired", "payment_missed",
+                            "plan_not_confirmed",
+                        ],
+                        "description": "Código del hito.",
+                    },
+                    "metadata": {
+                        "type": "object",
+                        "description": "Contexto del hito. Para debt_paid_off incluir debt_name y amount.",
+                    },
+                },
+                "required": ["code"],
+            },
+        },
+        {
             "name": "create_planned_expense",
             "description": (
                 "Crea un gasto futuro previsible que todavía no es transacción real ni obligación mensual. "
@@ -785,6 +815,7 @@ def build_tool_map(
         "delete_debt": lambda p: _delete(f"/api/v1/debts/{p['id']}"),
         "create_recurring_obligation": lambda p: _post("/api/v1/recurring_obligations", p),
         "update_recurring_obligation": lambda p: _patch(f"/api/v1/recurring_obligations/{p.pop('id')}", p),
+        "create_milestone": lambda p: api.create_milestone(p["code"], p.get("metadata", {})),
         "delete_recurring_obligation": lambda p: _delete(f"/api/v1/recurring_obligations/{p['id']}"),
         "create_planned_expense": lambda p: _post("/api/v1/planned_expenses", p),
         "update_planned_expense": lambda p: _patch(f"/api/v1/planned_expenses/{p.pop('id')}", p),

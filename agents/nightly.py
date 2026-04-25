@@ -299,6 +299,7 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort) -> dict:
         "settle_credit_card_payments":   settle_credit_card_payments,
         "send_telegram":                 send_telegram,
         "send_poll":                     send_poll,
+        "create_milestone":              lambda p: api.create_milestone(p["code"], p.get("metadata", {})),
     }
 
 
@@ -469,6 +470,36 @@ TOOLS = [
                 "options":  {"type": "array", "items": {"type": "string"}, "minItems": 2, "maxItems": 10},
             },
             "required": ["question", "options"],
+        },
+    },
+    {
+        "name": "create_milestone",
+        "description": (
+            "Registra un hito financiero (logro o setback). "
+            "Idempotente: si el hito ya existe para el mismo día, devuelve el existente sin error. "
+            "Llamalo cuando detectes automáticamente condiciones de hito al revisar el summary."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "code": {
+                    "type": "string",
+                    "enum": [
+                        "debt_paid_off", "first_debt_paid_off", "debt_free",
+                        "emergency_fund_reached", "first_monthly_plan",
+                        "three_months_planned", "investment_started",
+                        "month_positive_balance", "discretionary_under_budget",
+                        "overflow_deployed", "new_debt_acquired", "payment_missed",
+                        "plan_not_confirmed", "extra_debt_payment",
+                    ],
+                    "description": "Código del hito.",
+                },
+                "metadata": {
+                    "type": "object",
+                    "description": "Contexto del hito. Para debt_paid_off incluir debt_name y amount.",
+                },
+            },
+            "required": ["code"],
         },
     },
 ]
@@ -683,6 +714,17 @@ Si get_telegram_messages devuelve resolved_callbacks:
 
 ═══ ALERTA FIN DE MES ═══
 {alert_block}
+
+═══ DETECCIÓN AUTOMÁTICA DE HITOS ═══
+Durante la revisión nocturna, después de obtener get_summary y get_balance, verificá si alguna condición de hito aplica para HOY y llamá create_milestone si corresponde. Es idempotente — si ya existe para el día, no pasa nada.
+
+Condiciones a revisar:
+- balance.balance_confirmed > 0 al final del mes (día ≥ 28) → month_positive_balance (metadata: {{amount: balance_confirmed}})
+- burn_rate.categories alguna con spent < budget * 0.9 en categoría discretionary → discretionary_under_budget
+- overflow_status.realized_overflow > 0 y overflow_status.rule != null → overflow_deployed solo si hay evidencia de abono extra a deuda/ahorro
+- plan no confirmado (monthly_plan.status != "confirmed") al día 5+ → plan_not_confirmed
+
+No llames create_milestone por condiciones que no se verificaron con datos reales de la API.
 
 ═══ FLUJO RECOMENDADO ═══
 1. get_completeness → detectar gaps de contexto ANTES de todo

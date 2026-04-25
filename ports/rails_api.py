@@ -159,3 +159,13 @@ class RailsApiPort(ABC):
     def update_planned_expense(self, planned_expense_id: int | str, **attrs) -> dict:
         """PATCH /api/v1/planned_expenses/:id"""
         ...
+
+    @abstractmethod
+    def get_milestones(self) -> list[dict]:
+        """GET /api/v1/milestones"""
+        ...
+
+    @abstractmethod
+    def create_milestone(self, code: str, metadata: dict) -> dict:
+        """POST /api/v1/milestones"""
+        ...
