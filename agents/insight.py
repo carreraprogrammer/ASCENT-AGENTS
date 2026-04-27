@@ -211,7 +211,7 @@ def _sonnet_generate(
             lines.append(f"- {m['code']} on {date_str}{meta_str}")
         milestones_block = "\nRECENT MILESTONES (most recent first):\n" + "\n".join(lines) + "\n"
 
-    system = """You are a responsible personal finance advisor for el usuario.
+    system = """You are a responsible personal finance advisor.
 Generate a structured financial insight with a STRICT guardrail: never recommend deploying more than safe_to_deploy.
 If safe_to_deploy is 0, the primary action must be about covering next-cycle obligations first.
 Priority order: cash flow > quality of life > debt payoff > savings goals.

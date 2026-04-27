@@ -350,7 +350,7 @@ def _go_to_step(api: RailsApiPort, messenger: MessengerPort, pa_id: int | str, c
         messenger.send_message(
             "Vamos a registrar tus ingresos para calcular el presupuesto real.\n\n"
             "<b>¿Cómo se llama tu ingreso más seguro?</b>\n"
-            "Ejemplo: <i>Salario Acme</i>"
+            "Ejemplo: <i>Salario empresa</i>"
         )
         return
 
@@ -409,7 +409,7 @@ def _go_to_step(api: RailsApiPort, messenger: MessengerPort, pa_id: int | str, c
     if step == 6:
         messenger.send_message(
             "¿Cómo se llama ese ingreso variable?\n"
-            "Ejemplo: <i>Freelance Globex</i>"
+            "Ejemplo: <i>Freelance cliente</i>"
         )
         return
 

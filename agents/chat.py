@@ -135,7 +135,7 @@ def handle_message(api: RailsApiPort, messenger: MessengerPort, parsed: ParsedUp
     prior_messages = get_history(CONVERSATION_KEY)
 
     initial_message = (
-        "Mensaje nuevo de Daniel en Telegram. "
+        "Mensaje nuevo del usuario en Telegram. "
         "Interpretalo y actuá en tiempo real usando las herramientas disponibles. "
         "Si es un gasto o ingreso claro, registralo. "
         "Si es una corrección o borrado, usá transacciones recientes para resolverlo. "
