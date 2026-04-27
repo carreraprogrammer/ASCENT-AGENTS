@@ -84,6 +84,13 @@ unknown: usá cuando la categoría no está clara — subcategory_code omitido (
 - Para crear o actualizar transacciones:
   - la API espera date en DD/MM/YYYY o DD/MM
   - no uses YYYY-MM-DD
+  - siempre inferí payment_source desde el producto — nunca preguntes:
+    - tc0004 o tc0002 → payment_source: "credit_card", credit_card_status: "pending"
+    - debito, nequi, bre-b → payment_source: "debit"
+    - efectivo o sin producto claro → payment_source: "cash"
+  - la cuota mensual del iPhone (o cualquier cuota de deuda diferida en TC) se registra
+    con payment_source: "debit" — es plata saliendo de la cuenta de ahorros para pagar
+    la tarjeta, no una compra nueva en crédito. Nunca la registres como credit_card.
 - Si registrás un gasto o ingreso, la respuesta final debe incluir una lectura conductual mínima:
   - discretionary → marcá que fue discrecional o elegido
   - investment → marcá que construye futuro

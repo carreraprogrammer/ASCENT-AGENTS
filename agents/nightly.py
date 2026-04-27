@@ -646,6 +646,21 @@ Cuando Gmail muestra "Abono TC", "Pago TC", "Pago tarjeta", "Pago mínimo", "se 
 - Si settled_count == 0: "No había compras de TC pendientes registradas en el sistema"
 - NUNCA crear un gasto por el abono, NUNCA descomponer el abono en compras individuales
 
+═══ REGLA — CUOTAS DE DEUDA EN TARJETA DE CRÉDITO ═══
+Las deudas diferidas en TC (ej. compra de celular en cuotas a 0%) NO son compras nuevas.
+Cuando Gmail muestra el débito mensual de una cuota (ej. "cuota iPhone $230.000"):
+- NO llamar settle_credit_card_payments — la cuota ya está en el modelo de deuda
+- Si se registra como transacción, usar payment_source: "debit" (es plata saliendo de la
+  cuenta de ahorros para servir la deuda), nunca payment_source: "credit_card"
+- La cuota del iPhone a $230.000/mes es el ejemplo concreto: es una obligación estructural
+  ya capturada como Debt + recurring_obligation, no una compra cotidiana en crédito
+
+═══ INFERENCIA DE MEDIO DE PAGO ═══
+Inferí payment_source desde el producto — nunca preguntes:
+- tc0004 o tc0002 → payment_source: "credit_card", credit_card_status: "pending"
+- debito, nequi, bre-b → payment_source: "debit"
+- efectivo o sin producto claro → payment_source: "cash"
+
 ═══ DEDUPLICACIÓN ═══
 1. Telegram + Gmail mismo gasto → registrar UNA sola vez
 2. Duplicado = misma fecha + mismo monto (±2%) + mismo producto
