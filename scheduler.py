@@ -83,6 +83,15 @@ def _make_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
+    # ── Keep-alive Rails API (cada 5 min) — evita cold start en Railway ──────
+    scheduler.add_job(
+        func=_ping_rails,
+        trigger=CronTrigger(minute="*/5"),
+        id="rails_keepalive",
+        name="Keep-alive Rails API",
+        replace_existing=True,
+    )
+
     return scheduler
 
 
@@ -91,6 +100,18 @@ async def _run_insight_refresh_sync() -> None:
     from agents.insight import run_insight_refresh
     loop = asyncio.get_event_loop()
     await loop.run_in_executor(None, run_insight_refresh)
+
+
+async def _ping_rails() -> None:
+    """Pings Rails /health every 5 min to prevent cold starts on Railway."""
+    import httpx
+    from adapters.rails_http import BASE_URL, build_auth_headers
+    try:
+        r = httpx.get(f"{BASE_URL}/health", headers=build_auth_headers(), timeout=10)
+        if r.status_code >= 500:
+            logger.warning("[scheduler] keep-alive Rails responded %s", r.status_code)
+    except Exception as e:
+        logger.warning("[scheduler] keep-alive Rails failed: %s", e)
 
 
 async def _expire_pending_actions() -> None:
