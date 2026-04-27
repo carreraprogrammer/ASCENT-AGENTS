@@ -381,7 +381,7 @@ TOOLS = [
             "properties": {
                 "date":             {"type": "string"},
                 "concept":          {"type": "string"},
-                "product":          {"type": "string", "enum": ["nequi", "tc0004", "tc0002", "debito", "bre-b"]},
+                "product":          {"type": "string", "description": "Identificador del producto financiero extraído del email (ej: el código de tarjeta o billetera mencionado por el banco)."},
                 "amount":           {"type": "integer"},
                 "transaction_type": {"type": "string", "enum": ["expense", "income"]},
                 "status":           {"type": "string", "enum": ["confirmed", "pending"]},
@@ -421,7 +421,7 @@ TOOLS = [
         "description": (
             "Envía un mensaje a Daniel. Soporta inline_keyboard para botones interactivos. "
             "Callback data: 'cat:{id}:{subcat_code}' | 'confirm:{id}' | 'skip:{id}' | "
-            "'wizard:open:{YYYY-MM}' | 'wizard:snooze:{YYYY-MM}'."
+            "'pay:{id}:{product}' | 'wizard:open:{YYYY-MM}' | 'wizard:snooze:{YYYY-MM}'."
         ),
         "input_schema": {
             "type": "object",
@@ -654,12 +654,6 @@ Cuando Gmail muestra el débito mensual de una cuota (ej. "cuota iPhone $230.000
   cuenta de ahorros para servir la deuda), nunca payment_source: "credit_card"
 - La cuota del iPhone a $230.000/mes es el ejemplo concreto: es una obligación estructural
   ya capturada como Debt + recurring_obligation, no una compra cotidiana en crédito
-
-═══ INFERENCIA DE MEDIO DE PAGO ═══
-Inferí payment_source desde el producto — nunca preguntes:
-- tc0004 o tc0002 → payment_source: "credit_card", credit_card_status: "pending"
-- debito, nequi, bre-b → payment_source: "debit"
-- efectivo o sin producto claro → payment_source: "cash"
 
 ═══ DEDUPLICACIÓN ═══
 1. Telegram + Gmail mismo gasto → registrar UNA sola vez

@@ -13,14 +13,22 @@ from ports.messenger import MessengerPort
 logger = logging.getLogger(__name__)
 
 
+_PAYMENT_SOURCE_LABEL = {
+    "credit_card": "Tarjeta de Crédito 💳",
+    "debit":       "Débito / Transferencia 🏦",
+    "cash":        "Efectivo 💵",
+}
+
+
 def handle(api: RailsApiPort, messenger: MessengerPort, data: str) -> None:
     """
     Procesa un callback_query que NO es del wizard.
 
     Formatos esperados:
-      cat:{txn_id}:{subcat_code}  → clasificar y confirmar
-      confirm:{txn_id}            → confirmar pendiente
-      skip:{txn_id}               → posponer
+      cat:{txn_id}:{subcat_code}         → clasificar y confirmar
+      confirm:{txn_id}                   → confirmar pendiente
+      skip:{txn_id}                      → posponer
+      pay:{txn_id}:{payment_source}      → asignar medio de pago (credit_card|debit|cash)
     """
     parts = data.split(":")
 
@@ -45,6 +53,21 @@ def handle(api: RailsApiPort, messenger: MessengerPort, data: str) -> None:
         except Exception as e:
             logger.error("[callback_handler] confirm update failed: %s", e)
             messenger.send_message("❌ Error al confirmar.")
+
+    elif parts[0] == "pay" and len(parts) == 3:
+        txn_id, payment_source = parts[1], parts[2]
+        try:
+            kwargs: dict = {"payment_source": payment_source}
+            if payment_source == "credit_card":
+                kwargs["credit_card_status"] = "pending"
+            result = api.update_transaction(txn_id, **kwargs)
+            attrs = result.get("data", {}).get("attributes", result)
+            concept = attrs.get("concept", "transacción")
+            label = _PAYMENT_SOURCE_LABEL.get(payment_source, payment_source)
+            messenger.send_message(f"✅ <b>{concept}</b> → {label}")
+        except Exception as e:
+            logger.error("[callback_handler] pay update failed: %s", e)
+            messenger.send_message("❌ Error al actualizar el medio de pago.")
 
     elif parts[0] == "skip" and len(parts) == 2:
         txn_id = parts[1]

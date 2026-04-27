@@ -84,10 +84,19 @@ unknown: usá cuando la categoría no está clara — subcategory_code omitido (
 - Para crear o actualizar transacciones:
   - la API espera date en DD/MM/YYYY o DD/MM
   - no uses YYYY-MM-DD
-  - siempre inferí payment_source desde el producto — nunca preguntes:
-    - tc0004 o tc0002 → payment_source: "credit_card", credit_card_status: "pending"
-    - debito, nequi, bre-b → payment_source: "debit"
-    - efectivo o sin producto claro → payment_source: "cash"
+  - si el mensaje menciona el medio de pago, inferí directamente sin preguntar:
+    - mención de tarjeta de crédito → payment_source: "credit_card", credit_card_status: "pending"
+    - mención de débito, Nequi, transferencia → payment_source: "debit"
+    - mención de efectivo → payment_source: "cash"
+  - si el mensaje NO especifica el medio de pago:
+    - Primero creá la transacción (sin payment_source)
+    - Luego mandá send_telegram con el registro confirmado + inline_keyboard "¿Con qué pagaste?":
+      [ [{"text": "Tarjeta de Crédito 💳",      "callback_data": "pay:{id}:credit_card"}],
+        [{"text": "Débito / Transferencia 🏦",  "callback_data": "pay:{id}:debit"}],
+        [{"text": "Efectivo 💵",                "callback_data": "pay:{id}:cash"}] ]
+    - Esto es CRÍTICO para la deduplicación: el agente nocturno registra las compras con
+      payment_source conocido desde Gmail. Si la transacción de Telegram ya tiene el mismo
+      payment_source, la API puede detectar el duplicado (date+amount+payment_source).
   - la cuota mensual del iPhone (o cualquier cuota de deuda diferida en TC) se registra
     con payment_source: "debit" — es plata saliendo de la cuenta de ahorros para pagar
     la tarjeta, no una compra nueva en crédito. Nunca la registres como credit_card.

@@ -176,6 +176,7 @@ def build_tools() -> list[dict[str, Any]]:
                     "subcategory_id": {"type": "integer"},
                     "category_code": {"type": "string"},
                     "subcategory_code": {"type": "string"},
+                    "payment_source": {"type": "string", "enum": ["credit_card", "debit", "cash"]},
                     "clarification_resolved_at": {"type": "string"},
                     "metadata": {"type": "object"},
                 },
@@ -515,7 +516,8 @@ def build_tools() -> list[dict[str, Any]]:
             "name": "send_telegram",
             "description": (
                 "Envía la respuesta final. Soporta inline_keyboard. "
-                "Para callbacks rápidos usa chat:... como callback_data."
+                "Formatos de callback_data: "
+                "'cat:{id}:{subcat_code}' | 'pay:{id}:{payment_source}' (credit_card|debit|cash) | 'confirm:{id}' | 'skip:{id}'."
             ),
             "input_schema": {
                 "type": "object",
