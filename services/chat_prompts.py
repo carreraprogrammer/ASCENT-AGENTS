@@ -205,15 +205,15 @@ COMMAND_PROMPTS = {
         "con alertas claras si voy mal. Si hay overflow, aclará que no debe inflar el presupuesto base. "
         "Si no hay plan confirmado, mencionalo y ofrecé armarlo."
     ),
-    "ingresos": "__income_wizard__",
+    "ingresos": "__income_summary__",
 }
 
 HELP_TEXT = """\
 📊 <b>Comandos disponibles</b>
 
 /resumen — Resumen del mes
-/presupuesto — Estado de presupuestos
-/deudas — Estado de deudas
+/plan — Estado de presupuestos
+/ingresos — Ingresos proyectados y reales
 /balance — Saldo disponible
 
 También podés escribirme normal:

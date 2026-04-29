@@ -12,6 +12,143 @@ from services.llm_factory import build_llm_provider, resolve_llm_model
 
 logger = logging.getLogger(__name__)
 
+MESES = [
+    "enero", "febrero", "marzo", "abril", "mayo", "junio",
+    "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"
+]
+
+
+def _fmt_cop(amount: int | float | str | None) -> str:
+    value = int(float(amount or 0))
+    return f"${value:,}".replace(",", ".")
+
+
+def _resource_attrs(resource: dict) -> dict:
+    return resource.get("attributes") or resource
+
+
+def _day_label(day_from: int | str | None, day_to: int | str | None) -> str:
+    start = int(day_from or 0)
+    end = int(day_to or start)
+    if start <= 0:
+        return "sin fecha"
+    if end == start:
+        return f"día {start}"
+    return f"días {start}-{end}"
+
+
+def _classification_label(attrs: dict) -> str:
+    classification = (attrs.get("classification") or "").strip()
+    if classification == "base":
+        return "base confiable"
+    if classification == "variable" or attrs.get("is_variable") is True:
+        return "variable"
+    if classification == "seasonal":
+        return "estacional"
+    if classification == "one_time":
+        return "único"
+    return "sin clasificar"
+
+
+def _income_source_line(source: dict) -> str:
+    attrs = _resource_attrs(source)
+    schedules = attrs.get("schedules") or []
+    if schedules:
+        schedule_bits = [
+            _day_label(row.get("expected_day_from"), row.get("expected_day_to"))
+            for row in schedules[:3]
+        ]
+        timing = ", ".join(schedule_bits)
+    else:
+        timing = _day_label(attrs.get("expected_day_from"), attrs.get("expected_day_to"))
+
+    return (
+        f"• {attrs.get('name') or 'Ingreso'} — "
+        f"{_fmt_cop(attrs.get('expected_amount'))}/mes · "
+        f"{_classification_label(attrs)} · {timing}"
+    )
+
+
+def _income_transaction_line(transaction: dict) -> str:
+    attrs = _resource_attrs(transaction)
+    date = str(attrs.get("date") or "")[:10]
+    concept = attrs.get("concept") or "Ingreso"
+    return f"• {date} — {concept} — {_fmt_cop(attrs.get('amount'))}"
+
+
+def _variation_line(actual: int, projected: int) -> str:
+    delta = actual - projected
+    if projected <= 0:
+        return "• Variación vs plan: sin plan de ingresos comparable"
+    if delta == 0:
+        return "• Variación vs plan: en línea con lo esperado"
+    sign = "+" if delta > 0 else "-"
+    return f"• Variación vs plan: {sign}{_fmt_cop(abs(delta))}"
+
+
+def _send_income_summary(api: RailsApiPort, messenger: MessengerPort) -> None:
+    now_col = datetime.now(COLOMBIA_TZ)
+    month = now_col.month
+    year = now_col.year
+
+    summary = api.get_summary(month, year)
+    sources = [source for source in api.get_income_sources() if _resource_attrs(source).get("active", True)]
+    transactions = api.get_transactions(month, year)
+    income_transactions = [
+        txn for txn in transactions
+        if _resource_attrs(txn).get("transaction_type") == "income"
+        and _resource_attrs(txn).get("status") == "confirmed"
+    ]
+
+    balance = summary.get("balance") or {}
+    plan = summary.get("monthly_plan") or {}
+    liquidity = summary.get("liquidity") or {}
+    actual_income = int(balance.get("income_confirmed") or 0)
+    base_income = int(plan.get("base_budget_income") or 0)
+    variable_income = int(plan.get("expected_variable_income") or 0)
+    if base_income <= 0 and variable_income <= 0:
+        base_income = sum(
+            int(_resource_attrs(source).get("expected_amount") or 0)
+            for source in sources
+            if _classification_label(_resource_attrs(source)) == "base confiable"
+        )
+        variable_income = sum(
+            int(_resource_attrs(source).get("expected_amount") or 0)
+            for source in sources
+            if _classification_label(_resource_attrs(source)) != "base confiable"
+        )
+    projected_income = base_income + variable_income
+
+    source_lines = [_income_source_line(source) for source in sources[:8]]
+    if not source_lines:
+        source_lines = [
+            "• No hay fuentes proyectadas activas. Podés configurarlas desde la UI o escribirme <code>configurar ingresos</code>."
+        ]
+
+    recent_income_lines = [_income_transaction_line(txn) for txn in income_transactions[:6]]
+    if not recent_income_lines:
+        recent_income_lines = [ "• No hay ingresos confirmados registrados este mes." ]
+
+    message = "\n".join([
+        f"📥 <b>Ingresos — {MESES[month - 1].capitalize()} {year}</b>",
+        "",
+        "<b>Real del mes</b>",
+        f"• Confirmado: <b>{_fmt_cop(actual_income)}</b>",
+        f"• Plan esperado: {_fmt_cop(projected_income)} ({_fmt_cop(base_income)} base + {_fmt_cop(variable_income)} variable)",
+        _variation_line(actual_income, projected_income),
+        f"• Pendiente proyectado este mes: {_fmt_cop(liquidity.get('pending_income'))}",
+        "",
+        "<b>Fuentes proyectadas</b>",
+        *source_lines,
+        "",
+        "<b>Registrado este mes</b>",
+        *recent_income_lines,
+        "",
+        "Para crear o corregir una fuente, decímelo en una frase o hacelo desde la UI."
+    ])
+
+    messenger.send_message(message)
+
 
 def _apply_preflight(
     api: RailsApiPort,
@@ -103,6 +240,10 @@ def handle_command(api: RailsApiPort, messenger: MessengerPort, parsed: ParsedUp
     if COMMAND_PROMPTS[command] == "__income_wizard__":
         from flows import income_wizard
         income_wizard.trigger(api, messenger)
+        return
+
+    if COMMAND_PROMPTS[command] == "__income_summary__":
+        _send_income_summary(api, messenger)
         return
 
     try:

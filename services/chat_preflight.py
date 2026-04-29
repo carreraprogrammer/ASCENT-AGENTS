@@ -91,17 +91,11 @@ def detect_preflight_intent(*, command: str | None = None, text: str | None = No
         return "debt_status"
 
     income_setup_markers = (
-        "mis ingresos",
-        "registrar ingreso",
-        "registrar ingresos",
-        "agregar ingreso",
-        "ingresos del mes",
-        "cuánto gano",
-        "cuanto gano",
-        "fuentes de ingreso",
-        "ingreso base",
-        "mi salario",
+        "abrir wizard de ingresos",
+        "wizard de ingresos",
+        "configurar ingreso",
         "configurar ingresos",
+        "reconfigurar ingresos",
     )
 
     if any(marker in normalized_text for marker in income_setup_markers):

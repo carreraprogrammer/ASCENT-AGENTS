@@ -15,7 +15,7 @@ COMMANDS = [
     {"command": "resumen",     "description": "Resumen del mes con burn rate y alertas"},
     {"command": "balance",     "description": "Saldo disponible ahora mismo"},
     {"command": "plan",        "description": "Ver o armar el plan mensual"},
-    {"command": "ingresos",    "description": "Registrar o revisar fuentes de ingreso"},
+    {"command": "ingresos",    "description": "Ingresos proyectados y reales del mes"},
 ]
 
 resp = httpx.post(f"{TG_BASE}/setMyCommands", json={"commands": COMMANDS})
