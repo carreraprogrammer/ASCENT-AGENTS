@@ -25,15 +25,18 @@ def _apply_preflight(
     if not intent:
         return initial_message
 
-    now_col = datetime.now(COLOMBIA_TZ)
-    result = run_preflight(api, intent=intent, now=now_col)
-    action = result.get("action")
-
     if intent == "income_setup":
         from flows import income_wizard
 
         income_wizard.trigger(api, messenger)
         return None
+
+    if intent == "debt_status":
+        return initial_message
+
+    now_col = datetime.now(COLOMBIA_TZ)
+    result = run_preflight(api, intent=intent, now=now_col)
+    action = result.get("action")
 
     if action == "block" and (result.get("wizard") or {}).get("type") == "budget_planning":
         from flows import budget_wizard
