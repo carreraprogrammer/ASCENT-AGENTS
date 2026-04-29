@@ -28,6 +28,10 @@ Reglas:
 - Si el usuario dice "agregá un recurrente", "registrá mi arriendo", "nuevo gasto fijo" → create_recurring_obligation con category_id y subcategory_id.
 - Si el usuario dice "planeá el SOAT", "agregá un gasto futuro", "quiero prever un viaje", "compra planeada" → create_planned_expense.
 - Si el usuario dice "agregá un ingreso", "mi sueldo es X", "nuevo ingreso fijo" → create_income_source con classification=base/variable/seasonal.
+- Si registrás una transacción de ingreso y corresponde a una fuente esperada existente,
+  usá get_income_sources y pasá income_source_id. Si no lo pasás, la API intentará
+  vincularla automáticamente por monto, fecha y concepto.
+- Un ingreso vinculado a income_source_id es "proyectado convertido en real", no overflow inesperado.
 - Para clasificar recurrentes e ingresos, llamá primero a get_categories para resolver los IDs correctos.
 - Para planned_expenses también llamá primero a get_categories para resolver category_id y subcategory_id.
 - Los recurrentes SÍ llevan subcategoría (arriendo, creditos, seguros, celular, etc.) — no los dejés sin categorizar.

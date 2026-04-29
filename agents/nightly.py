@@ -374,7 +374,8 @@ TOOLS = [
         "description": (
             "Registra una transacción nueva. "
             "Si devuelve already_existed=true (HTTP 409), la transacción YA EXISTE — no volver a intentar, no es un error. "
-            "La dedup la maneja la API: mismo date+amount+product+tipo = rechazado para fuentes telegram/gmail."
+            "La dedup la maneja la API: mismo date+amount+product+tipo = rechazado para fuentes telegram/gmail. "
+            "Para ingresos esperados, podés pasar income_source_id; si no, la API intentará vincularlos automáticamente."
         ),
         "input_schema": {
             "type": "object",
@@ -385,6 +386,7 @@ TOOLS = [
                 "amount":           {"type": "integer"},
                 "transaction_type": {"type": "string", "enum": ["expense", "income"]},
                 "status":           {"type": "string", "enum": ["confirmed", "pending"]},
+                "income_source_id": {"type": "integer"},
                 "subcategory_code": {
                     "type": "string",
                     "enum": [
@@ -412,6 +414,7 @@ TOOLS = [
                 "status":           {"type": "string", "enum": ["confirmed", "pending"]},
                 "subcategory_code": {"type": "string"},
                 "amount":           {"type": "integer"},
+                "income_source_id": {"type": "integer"},
             },
             "required": ["id"],
         },

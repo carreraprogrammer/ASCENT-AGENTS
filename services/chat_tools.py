@@ -100,7 +100,8 @@ def build_tools() -> list[dict[str, Any]]:
                 "Crea múltiples transacciones en una sola llamada. "
                 "Usá este tool cuando el mensaje mencione 2 o más gastos o ingresos con montos distintos. "
                 "Más eficiente que llamar create_transaction varias veces. "
-                "Incluí payment_source ('credit_card', 'debit', 'cash') si el usuario lo menciona o si se infiere del contexto."
+                "Incluí payment_source ('credit_card', 'debit', 'cash') si el usuario lo menciona o si se infiere del contexto. "
+                "Para ingresos esperados, podés incluir income_source_id; si no, la API intentará vincularlo automáticamente."
             ),
             "input_schema": {
                 "type": "object",
@@ -122,6 +123,7 @@ def build_tools() -> list[dict[str, Any]]:
                                 "subcategory_code": {"type": "string"},
                                 "source": {"type": "string", "enum": ["telegram", "gmail", "manual"]},
                                 "payment_source": {"type": "string", "enum": ["credit_card", "debit", "cash"]},
+                                "income_source_id": {"type": "integer"},
                             },
                             "required": ["date", "concept", "amount", "transaction_type", "status"],
                         },
@@ -136,6 +138,7 @@ def build_tools() -> list[dict[str, Any]]:
                 "Crea una transacción. Para Telegram usa source=telegram. "
                 "No inventes source_event_id: el sistema lo inyecta automáticamente. "
                 "La API espera date en DD/MM/YYYY o DD/MM. "
+                "Para ingresos esperados, podés incluir income_source_id; si lo omitís, la API intentará vincularlo por monto, fecha y concepto. "
                 "Si el usuario menciona con qué pagó (tarjeta, Nequi, efectivo, débito), incluí payment_source: "
                 "'credit_card' para cualquier tarjeta de crédito, 'debit' para débito/Nequi/transferencia, 'cash' para efectivo. "
                 "Las compras con credit_card quedan como pendientes de pagar hasta que llegue el abono al banco."
@@ -156,6 +159,7 @@ def build_tools() -> list[dict[str, Any]]:
                     "source": {"type": "string", "enum": ["telegram", "gmail", "manual"]},
                     "metadata": {"type": "object"},
                     "payment_source": {"type": "string", "enum": ["credit_card", "debit", "cash"]},
+                    "income_source_id": {"type": "integer"},
                 },
                 "required": ["date", "concept", "amount", "transaction_type", "status"],
             },
@@ -206,6 +210,7 @@ def build_tools() -> list[dict[str, Any]]:
                     "category_code": {"type": "string"},
                     "subcategory_code": {"type": "string"},
                     "payment_source": {"type": "string", "enum": ["credit_card", "debit", "cash"]},
+                    "income_source_id": {"type": "integer"},
                     "clarification_resolved_at": {"type": "string"},
                     "metadata": {"type": "object"},
                 },
