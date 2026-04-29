@@ -4,70 +4,72 @@
 
 FastAPI corriendo en Railway. Recibe mensajes de Telegram vía webhook, corre agentes LLM con tool use, y programa automatizaciones nocturnas y quincenales con APScheduler — sin GitHub Actions.
 
-## Multi-LLM Phase Status
+## Multi-LLM
 
-Implementado en esta fase:
+Abstracción `LlmProviderPort` con adapters para Anthropic, OpenAI-compatible (GPT, DeepSeek, Kimi).
 
-- abstracción mínima `LlmProviderPort`
-- provider Anthropic extraído como adapter concreto
-- provider OpenAI-compatible para GPT
-- provider OpenAI-compatible para Kimi
-- selección de provider/model por `LLM_PROVIDER` y `LLM_MODEL`
-- compatibilidad con nombres legacy `OPEN_AI_API_KEY` y `KIMI_AI_API_KEY`
+**Provider activo en producción: `openai` (DeepSeek V3 via `deepseek-chat`)**
 
-Validación real de esta fase:
+Benchmarks realizados (ver `research/llm-providers/`):
 
-- OpenAI: probado localmente con tool calling real usando `gpt-4.1-mini`
-- Kimi: probado localmente con tool calling real usando `kimi-k2.5`
-- Anthropic: compatibilidad preservada por adapter dedicado, pero sin prueba runtime en esta iteración por falta de crédito disponible
+- Kimi k2.6: descartado — alucinaciones en tool use, retry loops, inestable en producción
+- DeepSeek V3: aprobado — tool calling robusto, costo bajo, respuestas en español coloquial correcto
+- GPT-4.1-mini: aprobado como alternativa de respaldo
 
-Estado operativo elegido:
+Configuración activa:
 
-- provider por defecto recomendado para esta fase: `kimi`
-- modelo por defecto recomendado para esta fase: `kimi-k2.6`
+```env
+LLM_PROVIDER=openai
+LLM_MODEL=deepseek-chat
+OPENAI_API_KEY=sk-...        # apunta a api.deepseek.com/v1 via base_url
+```
 
-Límites explícitos:
+Sin fallback automático entre providers. Sin selector por usuario.
 
-- no hay fallback automático entre providers
-- no hay benchmark automático
-- no hay Gemini en esta fase
-- no hay selector persistido por usuario ni UI de preferencias de modelo
+## Capacidades financieras expuestas
 
-## Capacidades financieras expuestas hoy
+**Lectura:**
+- `summary`, `safe_to_deploy`, `completeness`
+- deudas, ingresos, obligaciones recurrentes, planned_expenses, sinking_funds, savings_goals
+- historial de transacciones + pending + structural_match
 
-- leer `summary`, deudas, ingresos y obligaciones recurrentes
-- crear y actualizar `recurring_obligations`
-- leer, crear y actualizar `planned_expenses`
-- consultar relación deuda ↔ obligación recurrente vía `source_type/source_id`
-- quitar vínculo deuda ↔ obligación recurrente vía `update_recurring_obligation`
+**Escritura:**
+- crear/actualizar transacciones, deudas, recurring_obligations, planned_expenses, sinking_funds
+- confirmar/cerrar plan mensual
+- crear milestones y marcar paid_off
 
-Regla operativa:
+**Canal web:**
+- `POST /api/v1/agents/chat` — recibe mensaje con `source: "web"`, corre el agente, emite eventos UI
+- `emit_ui_event` (no `send_telegram`) cuando `source == "web"`
 
-- flujo mensual → `recurring_obligations`
-- estado del pasivo → `debts`
-- planeación futura → `planned_expenses`
+**Reglas operativas (no violar):**
 
-El Brain no debe registrar como transacción algo que todavía es solo gasto futuro previsible.
+| Entidad | Cuándo usar |
+|---------|------------|
+| `transactions` | ya ocurrió |
+| `recurring_obligations` | impacto mensual fijo en caja |
+| `debts` | estado estructural del pasivo |
+| `planned_expenses` | gasto futuro previsible, no mensual |
+| `sinking_funds` | reserva acumulativa para fondear un planned_expense |
 
-Para desvincular una deuda de una obligación recurrente, el contrato operativo es:
-
-- `update_recurring_obligation`
-- `source_type = null`
-- `source_id = null`
+- `creditos` en RecurringObligation **exige** `source_type=Debt` — no crear sin deuda asociada
+- no registrar como transacción algo que es solo gasto futuro previsible
+- para desvincular deuda ↔ obligación: `update_recurring_obligation` con `source_type=null, source_id=null`
 
 ---
 
 ## Rol en la arquitectura
 
 ```
-Telegram
-    ↕  webhook / send message
+Telegram             Web App (Ionic PWA)
+    ↕ webhook              ↕ POST /agents/chat
 FastAPI — daniel15k-agents  (este repo)
-    ├── /webhook/telegram    ← entrada de mensajes y callbacks
-    ├── /agents/nightly      ← trigger manual de revisión nocturna
-    ├── /agents/planning     ← trigger manual de planificación quincenal
-    └── scheduler            ← APScheduler: cron interno
-    ↕  REST + account delegation
+    ├── /webhook/telegram      ← entrada Telegram + callbacks
+    ├── /agents/chat           ← entrada web con source:"web"
+    ├── /agents/nightly        ← trigger manual revisión nocturna
+    ├── /agents/planning       ← trigger manual planificación quincenal
+    └── scheduler              ← APScheduler: cron interno
+    ↕  REST + service_account delegation
 Rails API — daniel15k-api   (data layer)
 ```
 
@@ -230,30 +232,20 @@ Resolución efectiva:
 - si `LLM_MODEL` no está seteado, usa un default seguro por provider
 - en OpenAI y Kimi se aceptan tanto nombres estándar como aliases legacy del `.env`
 
-Configuración recomendada para esta fase:
+Configuración activa en producción:
 
 ```env
-LLM_PROVIDER=kimi
-LLM_MODEL=kimi-k2.6
+LLM_PROVIDER=openai
+LLM_MODEL=deepseek-chat
 ```
 
 Cómo probar localmente:
 
 ```bash
 source .env
-./.venv/bin/python -c "from services.llm_factory import resolve_llm_provider_name, resolve_llm_model; print(resolve_llm_provider_name(), resolve_llm_model())"
+LLM_PROVIDER=openai LLM_MODEL=deepseek-chat ./.venv/bin/python scripts/smoke_llm.py
 LLM_PROVIDER=openai LLM_MODEL=gpt-4.1-mini ./.venv/bin/python scripts/smoke_llm.py
-LLM_PROVIDER=kimi LLM_MODEL=kimi-k2.6 ./.venv/bin/python scripts/smoke_llm.py
 ```
-
-Cómo comparar providers con el mismo brain:
-
-1. Mantén iguales prompts, tools y contexto.
-2. Cambia solo `LLM_PROVIDER` y `LLM_MODEL`.
-3. Corre el mismo `scripts/smoke_llm.py` o el mismo flujo real del Brain.
-4. Compara costo, velocidad, tool use y calidad de respuesta por logs/resultados.
-
-La selección por UI queda fuera de esta fase.
 
 ---
 
@@ -262,6 +254,7 @@ La selección por UI queda fuera de esta fase.
 ```
 GET  /health                    → {"ok": true, "service": "daniel15k-agents"}
 POST /webhook/telegram          → entrada del webhook de Telegram
+POST /agents/chat               → canal web (source: "web") → emite agent_ui_events
 POST /agents/nightly            → trigger manual de revisión nocturna
 POST /agents/planning           → trigger manual de planificación quincenal
 ```
