@@ -98,8 +98,13 @@ unknown: usá cuando la categoría no está clara — subcategory_code omitido (
       payment_source conocido desde Gmail. Si la transacción de Telegram ya tiene el mismo
       payment_source, la API puede detectar el duplicado (date+amount+payment_source).
   - la cuota mensual del iPhone (o cualquier cuota de deuda diferida en TC) se registra
-    con payment_source: "debit" — es plata saliendo de la cuenta de ahorros para pagar
-    la tarjeta, no una compra nueva en crédito. Nunca la registres como credit_card.
+    con record_debt_payment y payment_source: "debit" — es plata saliendo de la cuenta
+    de ahorros para pagar la tarjeta, no una compra nueva en crédito. Nunca la registres
+    como credit_card ni como create_transaction aislada.
+  - Si el usuario dice que pagó, abonó, se descontó o debitó dinero para una deuda existente:
+    1. Usá get_debts y get_recurring_obligations si no tenés claro el debt_id.
+    2. Usá record_debt_payment con debt_id, amount, date, concept, source y subcategory_code="creditos".
+    3. No llames update_debt después; el backend descuenta el saldo de forma atómica.
 - Si registrás un gasto o ingreso, la respuesta final debe incluir una lectura conductual mínima:
   - discretionary → marcá que fue discrecional o elegido
   - investment → marcá que construye futuro

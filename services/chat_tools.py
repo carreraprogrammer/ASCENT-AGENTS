@@ -161,6 +161,35 @@ def build_tools() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "record_debt_payment",
+            "description": (
+                "Registra un abono a una deuda en una sola operación: crea la transacción vinculada, "
+                "la asocia con la obligación recurrente si existe y descuenta el monto del saldo de la deuda. "
+                "Usá este tool cuando el usuario diga que pagó, abonó, se descontó o debitó plata para una deuda "
+                "existente como una tarjeta, crédito o cuota de iPhone. Para cuotas/debitos desde cuenta usa payment_source='debit'."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "debt_id": {"type": "string"},
+                    "date": {"type": "string"},
+                    "concept": {"type": "string"},
+                    "product": {"type": "string"},
+                    "amount": {"type": "integer"},
+                    "source": {"type": "string", "enum": ["telegram", "gmail", "manual"]},
+                    "status": {"type": "string", "enum": ["confirmed", "pending"]},
+                    "category_id": {"type": "integer"},
+                    "subcategory_id": {"type": "integer"},
+                    "category_code": {"type": "string"},
+                    "subcategory_code": {"type": "string"},
+                    "payment_source": {"type": "string", "enum": ["credit_card", "debit", "cash"]},
+                    "recurring_obligation_id": {"type": "integer"},
+                    "metadata": {"type": "object"},
+                },
+                "required": ["debt_id", "date", "amount"],
+            },
+        },
+        {
             "name": "update_transaction",
             "description": "Corrige una transacción existente por ID.",
             "input_schema": {
@@ -755,6 +784,52 @@ def build_tool_map(
 
         return {"created": len(created), "errors": len(errors), "transactions": created}
 
+    def _record_debt_payment(input_data: dict) -> dict:
+        payload = _inject_source_event_id(dict(input_data))
+        debt_id = payload.pop("debt_id")
+        source_event_id = (payload.get("metadata") or {}).get("source_event_id")
+        logger.info(
+            "[chat_agent] record_debt_payment debt_id=%s amount=%s concept=%s date=%s source=%s event_id=%s",
+            debt_id,
+            payload.get("amount"),
+            payload.get("concept"),
+            payload.get("date"),
+            payload.get("source"),
+            source_event_id,
+        )
+
+        try:
+            result = _post(f"/api/v1/debts/{debt_id}/payments", payload)
+            data = result.get("data", result) if isinstance(result, dict) else {}
+            logger.info(
+                "[chat_agent] record_debt_payment OK debt_id=%s transaction_id=%s current_balance=%s",
+                debt_id,
+                (((data.get("transaction") or {}).get("data") or {}).get("id") if isinstance(data, dict) else "?"),
+                data.get("current_balance") if isinstance(data, dict) else "?",
+            )
+            return result
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 409:
+                raise
+
+            try:
+                data = exc.response.json()
+            except ValueError:
+                data = {}
+
+            duplicate_result = {
+                "ok": True,
+                "duplicate": True,
+                "already_recorded": True,
+                "existing_id": data.get("existing_id"),
+                "detail": ((data.get("errors") or [{}])[0]).get("detail") or "Duplicate debt payment",
+            }
+            logger.info(
+                "[chat_agent] record_debt_payment DUPLICATE existing_id=%s",
+                duplicate_result["existing_id"],
+            )
+            return duplicate_result
+
     def _web_search_with_notice(input_data: dict) -> dict:
         query = input_data.get("query", "")
         logger.info("[chat_agent] web_search query=%r", query)
@@ -807,6 +882,7 @@ def build_tool_map(
         "get_planned_expenses": lambda _: api.get_planned_expenses(),
         "create_transactions": _create_transactions,
         "create_transaction": _create_transaction,
+        "record_debt_payment": _record_debt_payment,
         "update_transaction": lambda p: _patch(f"/api/v1/transactions/{p.pop('id')}", p),
         "delete_transaction": lambda p: _delete(f"/api/v1/transactions/{p['id']}"),
         "update_financial_context": lambda p: api.update_financial_context(**p),
