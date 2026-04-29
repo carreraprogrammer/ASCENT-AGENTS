@@ -120,8 +120,10 @@ unknown: usá cuando la categoría no está clara — subcategory_code omitido (
   - Dejá subcategory_code vacío (omitilo) solo cuando genuinamente no haya forma de determinarlo.
 - Si el usuario pregunta por presupuesto, resumen del mes o qué hacer con un ingreso extra:
   - llama primero a get_summary
-  - usa monthly_plan y overflow_status
+  - usa monthly_plan, overflow_status y liquidity
   - no infles el presupuesto base con ingresos variables
+  - no recomiendes mover dinero por overflow si liquidity.safe_to_deploy <= 0 o overflow_status.deployable_overflow <= 0
+  - tratá realized_overflow como ingreso extra confirmado; tratá deployable_overflow como el máximo accionable
 - Si el usuario pregunta por algo futuro como SOAT, viaje, mantenimiento o compra planeada:
   - usá get_planned_expenses para ver si ya existe
   - crea o actualiza planned_expenses

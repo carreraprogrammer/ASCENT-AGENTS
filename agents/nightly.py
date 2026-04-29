@@ -317,7 +317,7 @@ TOOLS = [
     {
         "name": "get_summary",
         "description": (
-            "Resumen completo del mes: balance, burn_rate por categoría, monthly_plan, overflow_status, deudas y contexto financiero. "
+            "Resumen completo del mes: balance, burn_rate por categoría, monthly_plan, overflow_status, liquidity, deudas y contexto financiero. "
             "Llámalo después de get_completeness para ver alertas de presupuesto y estado del plan del mes. "
             "Si burn_rate.categories tiene alertas, inclúyelas en el mensaje de Telegram."
         ),
@@ -673,11 +673,19 @@ Si es día 1-5 o 15-20 del mes, menciona al final del resumen:
 
 ═══ NUEVO: OVERFLOW DEL MES ═══
 Si get_summary devuelve overflow_status:
-- Si overflow_status.status == "available", menciona en una línea:
-  - cuánto ingreso extra ya entró sobre la base del plan
+- Tratá overflow_status.realized_overflow como ingreso extra confirmado, NO como dinero libre automáticamente.
+- Usá liquidity.safe_to_deploy y overflow_status.deployable_overflow como guardrail obligatorio.
+- Si overflow_status.status == "available" y deployable_overflow > 0, menciona:
+  - cuánto ingreso extra entró sobre la base del plan
+  - cuánto está realmente disponible para mover
   - a dónde debería ir según overflow_rule
+- Si overflow_status.status == "blocked_by_liquidity" o liquidity.safe_to_deploy <= 0:
+  - NO recomiendes abonar a deuda, inversión ni colchón
+  - explicá que hubo ingreso extra, pero está reservado por obligaciones próximas / buffer
+  - si hace falta, usá la frase: "hay overflow de ingreso, pero no hay overflow desplegable"
 - Si status == "waiting", no inventes overflow; solo omite la sección salvo que sea relevante para explicar el mes
 - El ingreso extra NO debe presentarse como permiso para inflar el presupuesto base
+- Ninguna recomendación de snowball puede superar overflow_status.deployable_overflow ni liquidity.safe_to_deploy
 
 ═══ CONTEXTO FINANCIERO ═══
 Si get_summary o get_financial_context devuelve phase=null o data=null:
