@@ -20,7 +20,6 @@ from adapters.telegram_messenger import TelegramMessenger
 from agents.nightly import run_nightly
 from agents.web_chat import handle_web_chat
 from agents.insight import run_insight_refresh
-from flows.budget_wizard import trigger_planning
 
 # Rate limit: max once every 6 hours per account (simple in-memory guard)
 _insight_last_run: dict[str, datetime] = {}
@@ -57,12 +56,13 @@ async def trigger_nightly(background_tasks: BackgroundTasks) -> dict:
 
 
 @router.post("/planning")
-async def trigger_planning_endpoint(background_tasks: BackgroundTasks) -> dict:
-    """Dispara el wizard de planificación quincenal."""
+async def trigger_planning_endpoint() -> dict:
+    """Emite evento open_wizard para iniciar planificación desde la app."""
     api = RailsHttpAdapter()
     messenger = TelegramMessenger()
-    background_tasks.add_task(trigger_planning, api, messenger)
-    return {"ok": True, "message": "Wizard de planificación iniciado."}
+    api.create_agent_ui_event("open_wizard", {"wizard": "budget_planning"})
+    messenger.send_message("Es momento de armar el presupuesto mensual. Abrí la app para comenzar 📱")
+    return {"ok": True, "message": "Evento open_wizard emitido."}
 
 
 @router.post("/web_chat", dependencies=[Depends(_verify_service_token)])

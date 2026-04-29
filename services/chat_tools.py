@@ -252,11 +252,6 @@ def build_tools() -> list[dict[str, Any]]:
             },
         },
         {
-            "name": "trigger_financial_context_wizard",
-            "description": "Activa el wizard guiado de contexto financiero en Telegram.",
-            "input_schema": {"type": "object", "properties": {}, "required": []},
-        },
-        {
             "name": "update_debt",
             "description": "Actualiza una deuda.",
             "input_schema": {
@@ -846,12 +841,6 @@ def build_tool_map(
             logger.error("[chat_agent] web_search failed: %s", exc)
             return {"error": str(exc), "results": []}
 
-    def _trigger_fc_wizard(_: dict) -> dict:
-        from flows import financial_context_wizard
-
-        financial_context_wizard.trigger(api, messenger)
-        return {"ok": True, "message": "Wizard iniciado en Telegram."}
-
     def _navigate_to(input_data: dict) -> dict:
         return _emit_ui_event({"event_type": "navigate", "payload": {"route": input_data["route"]}})
 
@@ -891,7 +880,6 @@ def build_tool_map(
         "update_transaction": lambda p: _patch(f"/api/v1/transactions/{p.pop('id')}", p),
         "delete_transaction": lambda p: _delete(f"/api/v1/transactions/{p['id']}"),
         "update_financial_context": lambda p: api.update_financial_context(**p),
-        "trigger_financial_context_wizard": _trigger_fc_wizard,
         "navigate_to": _navigate_to,
         "emit_ui_event": _emit_ui_event,
         "update_debt": lambda p: _patch(f"/api/v1/debts/{p.pop('id')}", p),

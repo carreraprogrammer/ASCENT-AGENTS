@@ -15,7 +15,7 @@ from services.llm_factory import build_llm_provider, resolve_llm_model
 logger = logging.getLogger(__name__)
 
 # Herramientas que no tienen sentido en el canal web
-_WEB_EXCLUDED_TOOLS = {"send_telegram", "trigger_financial_context_wizard"}
+_WEB_EXCLUDED_TOOLS = {"send_telegram"}
 
 
 def _web_tools() -> list[dict]:

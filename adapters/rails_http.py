@@ -264,3 +264,11 @@ class RailsHttpAdapter(RailsApiPort):
     def create_milestone(self, code: str, metadata: dict) -> dict:
         result = self._post("/api/v1/milestones", {"code": code, "metadata": metadata or {}})
         return result.get("data", result) if isinstance(result, dict) else result
+
+    # --- agent ui events ---
+
+    def create_agent_ui_event(self, event_type: str, payload: dict, session_id: str | None = None) -> dict:
+        body: dict = {"event_type": event_type, "payload": payload}
+        if session_id:
+            body["session_id"] = session_id
+        return self._post("/api/v1/agent_events", body)

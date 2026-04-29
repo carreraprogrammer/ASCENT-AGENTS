@@ -163,9 +163,8 @@ def _apply_preflight(
         return initial_message
 
     if intent == "income_setup":
-        from flows import income_wizard
-
-        income_wizard.trigger(api, messenger)
+        api.create_agent_ui_event("open_wizard", {"wizard": "income_setup"})
+        messenger.send_message("Abrí la app para configurar tus ingresos 📱")
         return None
 
     if intent == "debt_status":
@@ -176,9 +175,8 @@ def _apply_preflight(
     action = result.get("action")
 
     if action == "block" and (result.get("wizard") or {}).get("type") == "budget_planning":
-        from flows import budget_wizard
-
-        budget_wizard.trigger(api, messenger, reason=result.get("message"))
+        api.create_agent_ui_event("open_wizard", {"wizard": "budget_planning"})
+        messenger.send_message(result.get("message") or "Abrí la app para armar el presupuesto mensual 📱")
         return None
 
     if action == "soft_nudge":
@@ -236,10 +234,10 @@ def handle_command(api: RailsApiPort, messenger: MessengerPort, parsed: ParsedUp
         messenger.send_message(f"❓ No conozco el comando <code>/{command}</code>.\n\n{HELP_TEXT}")
         return
 
-    # Comandos que disparan un wizard directamente
+    # Comandos que redirigen a la app
     if COMMAND_PROMPTS[command] == "__income_wizard__":
-        from flows import income_wizard
-        income_wizard.trigger(api, messenger)
+        api.create_agent_ui_event("open_wizard", {"wizard": "income_setup"})
+        messenger.send_message("Abrí la app para configurar tus ingresos 📱")
         return
 
     if COMMAND_PROMPTS[command] == "__income_summary__":

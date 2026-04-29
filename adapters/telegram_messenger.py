@@ -33,11 +33,10 @@ class TelegramMessenger(MessengerPort):
         Traduce un update de Telegram a un ParsedUpdate agnóstico.
 
         Prioridad de detección:
-          1. callback_query con data "wz:*"     → WIZARD_CALLBACK
-          2. callback_query con data "wizard:*" → WIZARD_TRIGGER
-          3. callback_query (resto)             → CATEGORIZATION_CALLBACK
-          4. message con text "/" al inicio     → COMMAND
-          5. message (resto)                    → EXPENSE_REPORT
+          1. callback_query con data "chat:*"   → CHAT_CALLBACK
+          2. callback_query (cat:/confirm:/skip) → CATEGORIZATION_CALLBACK
+          3. message con text "/" al inicio     → COMMAND
+          4. message (resto)                    → EXPENSE_REPORT
         """
         if cq := update.get("callback_query"):
             return self._parse_callback_query(cq, update)
@@ -51,38 +50,6 @@ class TelegramMessenger(MessengerPort):
     def _parse_callback_query(self, cq: dict, raw: dict) -> ParsedUpdate:
         data    = cq.get("data", "")
         cq_id   = cq.get("id", "")
-
-        if data.startswith("wi:"):
-            return ParsedUpdate(
-                intent=UserIntent.INCOME_WIZARD_CALLBACK,
-                callback_query_id=cq_id,
-                callback_data=data,
-                raw=raw,
-            )
-
-        if data.startswith("wz_fc:"):
-            return ParsedUpdate(
-                intent=UserIntent.FC_WIZARD_CALLBACK,
-                callback_query_id=cq_id,
-                callback_data=data,
-                raw=raw,
-            )
-
-        if data.startswith("wz:") or data.startswith("wz_"):
-            return ParsedUpdate(
-                intent=UserIntent.WIZARD_CALLBACK,
-                callback_query_id=cq_id,
-                callback_data=data,
-                raw=raw,
-            )
-
-        if data.startswith("wizard:"):
-            return ParsedUpdate(
-                intent=UserIntent.WIZARD_TRIGGER,
-                callback_query_id=cq_id,
-                callback_data=data,          # "wizard:start" | "wizard:tomorrow" | "wizard:skip"
-                raw=raw,
-            )
 
         if data.startswith("chat:"):
             return ParsedUpdate(
