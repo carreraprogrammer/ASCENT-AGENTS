@@ -54,7 +54,7 @@ def _should_refresh(current: dict, last_insight: dict | None, today: datetime) -
     if prev_on_track != curr_on_track:
         return True, "track_change"
 
-    if abs(current.get("safe_to_deploy", 0) - snap.get("safe_to_deploy", 0)) > DEPLOY_DRIFT_THRESHOLD:
+    if abs(current.get("deployable_overflow", 0) - snap.get("deployable_overflow", 0)) > DEPLOY_DRIFT_THRESHOLD:
         return True, "deploy_drift"
 
     # New milestone since last insight → always refresh
@@ -76,7 +76,7 @@ def _extract_current_state(summary: dict, milestones: list[dict]) -> dict:
     confirmed_balance = (
         balance.get("income_confirmed", 0) - balance.get("expense_confirmed", 0)
     )
-    safe_to_deploy    = liquidity.get("safe_to_deploy", 0)
+    deployable_overflow = (summary.get("overflow_status") or {}).get("deployable_overflow", 0)
     categories_on_track = [
         c["category"] for c in categories if c.get("on_track")
     ]
@@ -85,7 +85,7 @@ def _extract_current_state(summary: dict, milestones: list[dict]) -> dict:
 
     return {
         "confirmed_balance":    confirmed_balance,
-        "safe_to_deploy":       safe_to_deploy,
+        "deployable_overflow":  deployable_overflow,
         "categories_on_track":  categories_on_track,
         "period_month":         now_col.month,
         "period_year":          now_col.year,
@@ -156,20 +156,22 @@ def _build_client() -> anthropic.Anthropic:
 
 def _haiku_still_valid(client: anthropic.Anthropic, last_insight: dict, summary: dict) -> bool:
     """Ask Haiku if the previous insight is still actionable given the current state."""
-    prev_recs = json.dumps(last_insight.get("recommendations", {}), ensure_ascii=False)
-    safe      = summary.get("liquidity", {}).get("safe_to_deploy", 0)
-    ctx       = summary.get("financial_context") or {}
+    prev_recs        = json.dumps(last_insight.get("recommendations", {}), ensure_ascii=False)
+    deployable_now   = (summary.get("overflow_status") or {}).get("deployable_overflow", 0)
+    overflow_status  = (summary.get("overflow_status") or {}).get("status", "waiting")
+    ctx              = summary.get("financial_context") or {}
 
     prompt = f"""Previous insight recommendations:
 {prev_recs}
 
 Current state:
-- safe_to_deploy: {safe:,} COP
+- overflow_status: {overflow_status}
+- deployable_overflow: {deployable_now:,} COP
 - recommended_action: {ctx.get('recommended_action', 'none')}
 - buffer_status: {(summary.get('liquidity') or {}).get('buffer_status', 'unknown')}
 
 Answer ONLY with a JSON object: {{"still_valid": true}} or {{"still_valid": false}}
-The insight is NOT still valid if safe_to_deploy changed significantly or the
+The insight is NOT still valid if deployable_overflow changed significantly or the
 recommended action contradicts current liquidity."""
 
     resp = client.messages.create(
@@ -211,9 +213,18 @@ def _sonnet_generate(
             lines.append(f"- {m['code']} on {date_str}{meta_str}")
         milestones_block = "\nRECENT MILESTONES (most recent first):\n" + "\n".join(lines) + "\n"
 
+    overflow       = summary.get("overflow_status") or {}
+    deployable_now = overflow.get("deployable_overflow", 0)
+    deployable_cycle = liquidity.get("deployable_this_cycle", 0)
+    overflow_status  = overflow.get("status", "waiting")
+
     system = """You are a responsible personal finance advisor.
-Generate a structured financial insight with a STRICT guardrail: never recommend deploying more than safe_to_deploy.
-If safe_to_deploy is 0, the primary action must be about covering next-cycle obligations first.
+STRICT GUARDRAILS — read carefully:
+1. deployable_overflow = income that has ALREADY arrived above the base plan. This is what the user can move RIGHT NOW.
+2. deployable_this_cycle = conditional projection IF pending income arrives. Never present this as money available today.
+3. Never recommend deploying more than deployable_overflow.
+4. If deployable_overflow is 0 and overflow_status is "waiting", say the action is conditional on the pending income arriving — do NOT invent a dollar amount to deploy.
+5. safe_to_deploy is an internal survival guardrail — never mention it to the user or use it as the deploy amount.
 Priority order: cash flow > quality of life > debt payoff > savings goals.
 When recent milestones are present, reference them in signals with type "ok" — be specific and encouraging without being generic.
 Respond ONLY with a valid JSON object — no prose, no markdown."""
@@ -222,11 +233,15 @@ Respond ONLY with a valid JSON object — no prose, no markdown."""
 
 LIQUIDITY:
 - confirmed_balance: {liquidity.get('confirmed_balance', 0):,} COP
-- pending_income: {liquidity.get('pending_income', 0):,} COP
+- pending_variable: {liquidity.get('pending_variable', 0):,} COP  (NOT arrived yet)
 - projected_eom_balance: {liquidity.get('projected_eom_balance', 0):,} COP
-- next_cycle_obligations: {liquidity.get('next_cycle_obligations', 0):,} COP
-- safe_to_deploy: {liquidity.get('safe_to_deploy', 0):,} COP
+- next_cycle_obligations (full budget): {liquidity.get('next_cycle_obligations', 0):,} COP
 - buffer_status: {liquidity.get('buffer_status', 'unknown')}
+
+OVERFLOW (what's actionable):
+- overflow_status: {overflow_status}  (waiting = pending income hasn't arrived; available = surplus arrived and ready)
+- deployable_overflow: {deployable_now:,} COP  ← MAX deploy amount. Based on income already received.
+- deployable_this_cycle: {deployable_cycle:,} COP  ← Projection only if pending income arrives. Do NOT present as available today.
 
 FINANCIAL CONTEXT:
 - phase: {ctx.get('phase', 'unknown')}
@@ -244,8 +259,8 @@ Generate a JSON insight with this exact structure:
 {{
   "still_valid": false,
   "recommendations": {{
-    "primary_action": "One concrete sentence. Max deploy = safe_to_deploy.",
-    "safe_to_deploy_suggested": <integer COP, must be <= safe_to_deploy>,
+    "primary_action": "One concrete sentence. If overflow_status='waiting', say what will be possible once income arrives — do NOT state a deployable amount as if it's available today. If overflow_status='available', state the exact deployable_overflow amount.",
+    "safe_to_deploy_suggested": <integer COP, must be <= deployable_overflow>,
     "rationale": "2-3 sentences explaining why this is the right move given current cash flow."
   }},
   "signals": [
@@ -305,7 +320,7 @@ def run_insight_refresh(*, trigger: str = "scheduled") -> None:
 
     result = _sonnet_generate(client, summary, last_insight, reason, milestones)
 
-    safe_to_deploy = (summary.get("liquidity") or {}).get("safe_to_deploy", 0)
+    deployable_overflow = (summary.get("overflow_status") or {}).get("deployable_overflow", 0)
 
     payload = {
         "period_month":           month,
@@ -315,7 +330,7 @@ def run_insight_refresh(*, trigger: str = "scheduled") -> None:
         "recommendations":        result.get("recommendations", {}),
         "reasoning":              result.get("reasoning", ""),
         "signals":                result.get("signals", []),
-        "safe_to_deploy_amount":  safe_to_deploy,
+        "safe_to_deploy_amount":  deployable_overflow,
         "trigger_reason":         reason,
     }
 
