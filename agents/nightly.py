@@ -375,7 +375,9 @@ TOOLS = [
             "Registra una transacción nueva. "
             "Si devuelve already_existed=true (HTTP 409), la transacción YA EXISTE — no volver a intentar, no es un error. "
             "La dedup la maneja la API: mismo date+amount+product+tipo = rechazado para fuentes telegram/gmail. "
-            "Para ingresos esperados, podés pasar income_source_id; si no, la API intentará vincularlos automáticamente."
+            "Para ingresos esperados, podés pasar income_source_id; si no, la API intentará vincularlos automáticamente. "
+            "Para pagos de obligaciones recurrentes esperadas, podés pasar recurring_obligation_id. "
+            "Si el pago corresponde a otro mes, agregá metadata.applies_to_month/year y prepaid_obligation=true."
         ),
         "input_schema": {
             "type": "object",
@@ -385,9 +387,11 @@ TOOLS = [
                 "product":          {"type": "string", "description": "Identificador del producto financiero extraído del email (ej: el código de tarjeta o billetera mencionado por el banco)."},
                 "amount":           {"type": "integer"},
                 "transaction_type": {"type": "string", "enum": ["expense", "income"]},
-                "status":           {"type": "string", "enum": ["confirmed", "pending"]},
-                "income_source_id": {"type": "integer"},
-                "subcategory_code": {
+	                "status":           {"type": "string", "enum": ["confirmed", "pending"]},
+	                "income_source_id": {"type": "integer"},
+	                "recurring_obligation_id": {"type": "integer"},
+	                "metadata":         {"type": "object"},
+	                "subcategory_code": {
                     "type": "string",
                     "enum": [
                         "salario", "freelance", "reembolso", "arriendo_recibido", "otros_ingreso",
@@ -413,9 +417,11 @@ TOOLS = [
                 "concept":          {"type": "string"},
                 "status":           {"type": "string", "enum": ["confirmed", "pending"]},
                 "subcategory_code": {"type": "string"},
-                "amount":           {"type": "integer"},
-                "income_source_id": {"type": "integer"},
-            },
+	                "amount":           {"type": "integer"},
+	                "income_source_id": {"type": "integer"},
+	                "recurring_obligation_id": {"type": "integer"},
+	                "metadata":         {"type": "object"},
+	            },
             "required": ["id"],
         },
     },

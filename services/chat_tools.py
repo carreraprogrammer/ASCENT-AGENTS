@@ -101,7 +101,9 @@ def build_tools() -> list[dict[str, Any]]:
                 "Usá este tool cuando el mensaje mencione 2 o más gastos o ingresos con montos distintos. "
                 "Más eficiente que llamar create_transaction varias veces. "
                 "Incluí payment_source ('credit_card', 'debit', 'cash') si el usuario lo menciona o si se infiere del contexto. "
-                "Para ingresos esperados, podés incluir income_source_id; si no, la API intentará vincularlo automáticamente."
+                "Para ingresos esperados, podés incluir income_source_id; si no, la API intentará vincularlo automáticamente. "
+                "Para pagos de gastos recurrentes esperados, incluí recurring_obligation_id. "
+                "Si es pago anticipado de otro mes, agregá metadata.applies_to_month, metadata.applies_to_year y metadata.prepaid_obligation=true."
             ),
             "input_schema": {
                 "type": "object",
@@ -123,7 +125,9 @@ def build_tools() -> list[dict[str, Any]]:
                                 "subcategory_code": {"type": "string"},
                                 "source": {"type": "string", "enum": ["telegram", "gmail", "manual"]},
                                 "payment_source": {"type": "string", "enum": ["credit_card", "debit", "cash"]},
+                                "recurring_obligation_id": {"type": "integer"},
                                 "income_source_id": {"type": "integer"},
+                                "metadata": {"type": "object"},
                             },
                             "required": ["date", "concept", "amount", "transaction_type", "status"],
                         },
@@ -139,6 +143,8 @@ def build_tools() -> list[dict[str, Any]]:
                 "No inventes source_event_id: el sistema lo inyecta automáticamente. "
                 "La API espera date en DD/MM/YYYY o DD/MM. "
                 "Para ingresos esperados, podés incluir income_source_id; si lo omitís, la API intentará vincularlo por monto, fecha y concepto. "
+                "Para pagos de gastos recurrentes esperados, podés incluir recurring_obligation_id; si lo omitís, la API intentará vincularlo por monto y concepto. "
+                "Si el usuario dice que pagó una obligación por adelantado o para el siguiente mes, usa metadata con applies_to_month, applies_to_year, applies_to_period='YYYY-MM' y prepaid_obligation=true. "
                 "Si el usuario menciona con qué pagó (tarjeta, Nequi, efectivo, débito), incluí payment_source: "
                 "'credit_card' para cualquier tarjeta de crédito, 'debit' para débito/Nequi/transferencia, 'cash' para efectivo. "
                 "Las compras con credit_card quedan como pendientes de pagar hasta que llegue el abono al banco."
@@ -159,6 +165,7 @@ def build_tools() -> list[dict[str, Any]]:
                     "source": {"type": "string", "enum": ["telegram", "gmail", "manual"]},
                     "metadata": {"type": "object"},
                     "payment_source": {"type": "string", "enum": ["credit_card", "debit", "cash"]},
+                    "recurring_obligation_id": {"type": "integer"},
                     "income_source_id": {"type": "integer"},
                 },
                 "required": ["date", "concept", "amount", "transaction_type", "status"],
@@ -210,6 +217,7 @@ def build_tools() -> list[dict[str, Any]]:
                     "category_code": {"type": "string"},
                     "subcategory_code": {"type": "string"},
                     "payment_source": {"type": "string", "enum": ["credit_card", "debit", "cash"]},
+                    "recurring_obligation_id": {"type": "integer"},
                     "income_source_id": {"type": "integer"},
                     "clarification_resolved_at": {"type": "string"},
                     "metadata": {"type": "object"},

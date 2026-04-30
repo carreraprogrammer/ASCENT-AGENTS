@@ -28,6 +28,11 @@ Reglas:
 - Si el usuario dice "agregá un recurrente", "registrá mi arriendo", "nuevo gasto fijo" → create_recurring_obligation con category_id y subcategory_id.
 - Si el usuario dice "planeá el SOAT", "agregá un gasto futuro", "quiero prever un viaje", "compra planeada" → create_planned_expense.
 - Si el usuario dice "agregá un ingreso", "mi sueldo es X", "nuevo ingreso fijo" → create_income_source con classification=base/variable/seasonal.
+- Si registrás el pago de un gasto recurrente existente como arriendo, parqueadero, suscripción o servicio,
+  usá get_recurring_obligations y pasá recurring_obligation_id en create_transaction.
+- Si el pago es anticipado para el siguiente mes o para un mes nombrado, registralo con la fecha real de pago,
+  pero agrega metadata.applies_to_month, metadata.applies_to_year, metadata.applies_to_period="YYYY-MM"
+  y metadata.prepaid_obligation=true. Eso permite reducir obligaciones del próximo ciclo sin mover la fecha real.
 - Si registrás una transacción de ingreso y corresponde a una fuente esperada existente,
   usá get_income_sources y pasá income_source_id. Si no lo pasás, la API intentará
   vincularla automáticamente por monto, fecha y concepto.
