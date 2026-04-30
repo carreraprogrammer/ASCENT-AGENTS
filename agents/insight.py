@@ -213,10 +213,12 @@ def _sonnet_generate(
             lines.append(f"- {m['code']} on {date_str}{meta_str}")
         milestones_block = "\nRECENT MILESTONES (most recent first):\n" + "\n".join(lines) + "\n"
 
-    overflow       = summary.get("overflow_status") or {}
-    deployable_now = overflow.get("deployable_overflow", 0)
-    deployable_cycle = liquidity.get("deployable_this_cycle", 0)
-    overflow_status  = overflow.get("status", "waiting")
+    overflow          = summary.get("overflow_status") or {}
+    deployable_now    = overflow.get("deployable_overflow", 0)
+    realized_overflow = overflow.get("realized_overflow", 0)
+    deployable_cycle  = liquidity.get("deployable_this_cycle", 0)
+    overflow_status   = overflow.get("status", "waiting")
+    confirmed_balance = liquidity.get("confirmed_balance", 0)
 
     system = """You are a responsible personal finance advisor for a Colombian user paid in two quincenas per month.
 
@@ -228,12 +230,12 @@ CRITICAL INCOME TIMING CONTEXT:
 - If confirmed_balance is less than the user's largest single monthly obligation (likely rent ~$2-3M COP), DO NOT recommend any deployment — the user needs that cash to bridge the gap until the next quincena.
 
 STRICT GUARDRAILS:
-1. deployable_overflow = income that has ALREADY arrived above the base plan.
-2. deployable_this_cycle = conditional projection only. Never present as available today.
-3. Never recommend deploying more than deployable_overflow.
-4. If deployable_overflow is 0 and overflow_status is "waiting": say what will be possible once income arrives, no dollar amounts.
-5. safe_to_deploy is an internal guardrail — never mention it or use it as the deploy amount.
-6. If confirmed_balance < 2_000_000 COP: the primary_action must be about preserving cash for the quincena gap, NOT about debt deployment.
+1. deployable_overflow = income already arrived above the base plan, capped by confirmed_balance and next-cycle coverage.
+2. realized_overflow = gross income above the base plan — this may be higher than deployable_overflow because the month's expenses already consumed part of it.
+3. CRITICAL — if deployable_overflow < realized_overflow: you MUST explain this in your rationale. The cap is the confirmed_balance (net of all month expenses). Say: "overflow of X arrived but after month expenses the net balance is Y — that's the actual ceiling for deployment."
+4. deployable_this_cycle = conditional projection only — never present as available today.
+5. safe_to_deploy is an internal guardrail — never mention it to the user.
+6. If confirmed_balance < 2_000_000 COP: primary_action must be about preserving cash for the quincena gap, NOT debt deployment.
 Priority order: cash flow timing > quality of life > debt payoff > savings goals.
 When recent milestones are present, reference them in signals with type "ok".
 Respond ONLY with a valid JSON object — no prose, no markdown."""
@@ -241,7 +243,7 @@ Respond ONLY with a valid JSON object — no prose, no markdown."""
     user = f"""Financial state for {datetime.now(COLOMBIA_TZ).strftime('%B %Y')}:
 
 LIQUIDITY:
-- confirmed_balance: {liquidity.get('confirmed_balance', 0):,} COP
+- confirmed_balance: {confirmed_balance:,} COP  ← actual net balance (income - expenses this month)
 - pending_variable: {liquidity.get('pending_variable', 0):,} COP  (NOT arrived yet)
 - projected_eom_balance: {liquidity.get('projected_eom_balance', 0):,} COP
 - next_cycle_obligations (full budget): {liquidity.get('next_cycle_obligations', 0):,} COP
@@ -249,7 +251,8 @@ LIQUIDITY:
 
 OVERFLOW (what's actionable):
 - overflow_status: {overflow_status}  (waiting = pending income hasn't arrived; available = surplus arrived and ready)
-- deployable_overflow: {deployable_now:,} COP  ← MAX deploy amount. Based on income already received.
+- realized_overflow: {realized_overflow:,} COP  ← gross income above base plan this month
+- deployable_overflow: {deployable_now:,} COP  ← MAX deployable. Capped by confirmed_balance. If less than realized_overflow, it's because expenses consumed the difference.
 - deployable_this_cycle: {deployable_cycle:,} COP  ← Projection only if pending income arrives. Do NOT present as available today.
 
 FINANCIAL CONTEXT:
@@ -268,9 +271,9 @@ Generate a JSON insight with this exact structure:
 {{
   "still_valid": false,
   "recommendations": {{
-    "primary_action": "One concrete sentence. If overflow_status='waiting', say what will be possible once income arrives — do NOT state a deployable amount as if it's available today. If overflow_status='available', state the exact deployable_overflow amount.",
+    "primary_action": "One concrete sentence. If overflow_status='waiting': say what will be possible once income arrives, no amounts. If overflow_status='available': state the deployable_overflow amount AND briefly why it differs from realized_overflow if they differ significantly.",
     "safe_to_deploy_suggested": <integer COP, must be <= deployable_overflow>,
-    "rationale": "2-3 sentences explaining why this is the right move given current cash flow."
+    "rationale": "2-3 sentences. If deployable_overflow < realized_overflow, EXPLAIN the balance cap: overflow arrived but expenses consumed part of it — the net balance is what's available."
   }},
   "signals": [
     {{"type": "warn|info|ok", "category": "category_name or milestone", "message": "short observation"}}
@@ -344,4 +347,4 @@ def run_insight_refresh(*, trigger: str = "scheduled") -> None:
     }
 
     _post_insight(payload)
-    logger.info("[insight] insight persisted — trigger=%s safe_to_deploy=%s", reason, safe_to_deploy)
+    logger.info("[insight] insight persisted — trigger=%s deployable_overflow=%s", reason, deployable_overflow)

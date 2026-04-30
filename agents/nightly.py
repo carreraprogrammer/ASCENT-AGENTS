@@ -547,46 +547,25 @@ def _month_end_context(now: datetime) -> dict:
 
 def _month_end_alert_block(me: dict) -> str:
     """
-    Returns the full ALERTA FIN DE MES section text, pre-rendered so it can
-    be safely embedded in the outer f-string without nested-quote conflicts.
+    Returns the ALERTA FIN DE MES section text.
+    Only informs the agent it's end-of-month so it can mention it in the summary.
+    No wizard CTA — the user opens the plan wizard from the dashboard.
     """
-    day        = me["day_of_month"]
-    days_left  = me["days_until_month_end"]
-    nm_name    = me["next_month_name"]
-    nm_yyyymm  = me["next_month_yyyy_mm"]
-    dias_word  = "día" if days_left == 1 else "días"
-
-    header = (
-        f"Hoy es día {day} del mes. "
-        + ("⚠️ Estamos en zona de cierre de mes." if me["is_month_end"] else "No es fin de mes — omitir esta sección completamente.")
-    )
+    day       = me["day_of_month"]
+    days_left = me["days_until_month_end"]
+    nm_name   = me["next_month_name"]
+    dias_word = "día" if days_left == 1 else "días"
 
     if not me["is_month_end"]:
-        return header
+        return f"Hoy es día {day} del mes. No es fin de mes — omitir esta sección completamente."
 
-    detail = (
-        f"Si hoy es día 28, 29, 30 o 31 del mes actual (y lo es — día {day}):\n\n"
-        f"1. El mes siguiente es {nm_name} ({nm_yyyymm}).\n"
-        f"   Faltan {days_left} {dias_word} para que empiece.\n\n"
-        f"2. Verificá en el resultado de get_summary si ya existe un monthly_plan confirmado para {nm_yyyymm}.\n"
-        f"   - Buscá en el campo monthly_plan del summary o en cualquier plan con period_start que contenga {nm_yyyymm}.\n"
-        f"   - Si el summary no lo reporta explícitamente, asumí que NO existe plan.\n\n"
-        f"3. Si NO existe plan confirmado para {nm_name}:\n"
-        f"   - Al final del resumen nocturno, antes de la sección ⚙️ de gaps, incluí esta sección especial:\n\n"
-        f"   ━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"   📅 {nm_name} empieza en {days_left} {dias_word}.\n"
-        f"   ¿Armamos el plan financiero para {nm_name}?\n\n"
-        f"   Ya tengo sugerencias basadas en tus últimos 3 meses.\n"
-        f"   ━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"   Envialo con send_telegram usando inline_keyboard con dos botones en filas separadas:\n"
-        f'   [[ {{"text": "Armar plan ahora 📋", "callback_data": "wizard:open:{nm_yyyymm}"}} ],\n'
-        f'    [ {{"text": "Recordarme mañana ⏰", "callback_data": "wizard:snooze:{nm_yyyymm}"}} ]]\n\n'
-        f"   Tono: primera persona, directo. No es un recordatorio genérico — es una acción concreta.\n\n"
-        f"4. Si YA existe plan confirmado para {nm_name}: omitir esta sección completamente.\n\n"
-        f"5. Si es fin de mes pero el usuario ya presionó \"Recordarme mañana\" "
-        f"(detectás un mensaje de snooze reciente en get_telegram_messages): omitir también."
+    return (
+        f"Hoy es día {day} del mes — zona de cierre. "
+        f"Faltan {days_left} {dias_word} para que empiece {nm_name}. "
+        f"Mencionalo brevemente en el resumen (ej: 'Mayo empieza en {days_left} {dias_word}'). "
+        f"NO incluir ningún CTA de plan, botones de wizard, ni preguntar si arman el plan — "
+        f"el usuario gestiona eso desde el dashboard."
     )
-    return f"{header}\n\n{detail}"
 
 
 def _build_system_prompt() -> str:
@@ -682,19 +661,21 @@ Si es día 1-5 o 15-20 del mes, menciona al final del resumen:
 
 ═══ NUEVO: OVERFLOW DEL MES ═══
 Si get_summary devuelve overflow_status:
-- Tratá overflow_status.realized_overflow como ingreso extra confirmado, NO como dinero libre automáticamente.
-- overflow_status.deployable_overflow = lo que realmente podés mover HOY (ingreso ya llegado sobre la base del plan).
+- overflow_status.realized_overflow = ingreso extra que llegó por encima del plan base. NO es dinero libre.
+- overflow_status.deployable_overflow = lo que podés mover HOY. Se calcula como el mínimo entre el overflow realizado, la cobertura del próximo ciclo (safe_to_deploy interno), y el balance_confirmed del mes. NUNCA puede ser mayor que el balance real.
+- CRÍTICO — cuando deployable_overflow < realized_overflow:
+  Es porque el balance_confirmed actúa como tope. Significa que el overflow llegó, pero gran parte ya se gastó durante el mes. NO digas "de eso, $X está disponible" sin explicar el por qué.
+  → Decí exactamente: "Entraron $X en overflow sobre el plan. Pero el saldo neto del mes (ingresos − gastos confirmados) es $Y. Eso es lo máximo que podés mover — el resto del overflow ya se fue en gastos del mes."
 - liquidity.deployable_this_cycle = proyección condicional solo si el ingreso pendiente llega. NO lo presentes como dinero disponible hoy.
 - liquidity.safe_to_deploy es una señal interna de supervivencia — NUNCA lo menciones al usuario ni lo uses como monto a desplegar.
-- Si overflow_status.status == "available" y deployable_overflow > 0, menciona:
-  - cuánto ingreso extra entró sobre la base del plan
-  - cuánto está realmente disponible para mover (deployable_overflow)
-  - a dónde debería ir según overflow_rule
+- Si overflow_status.status == "available" y deployable_overflow > 0:
+  - mencioná cuánto overflow llegó sobre el plan base
+  - explicá cuánto está disponible para mover (deployable_overflow) Y el motivo si es menor al overflow bruto
+  - indicá a dónde debería ir según overflow_rule
 - Si overflow_status.status == "blocked_by_liquidity":
   - NO recomiendes abonar a deuda, inversión ni colchón
   - explicá que hubo ingreso extra, pero está reservado por obligaciones próximas / buffer
-  - si hace falta, usá la frase: "hay overflow de ingreso, pero no hay overflow desplegable"
-- Si status == "waiting": el ingreso variable todavía no llegó — omite la sección o indicá que cuando llegue habrá margen
+- Si status == "waiting": el ingreso variable todavía no llegó — omití la sección o indicá que cuando llegue habrá margen
 - El ingreso extra NO debe presentarse como permiso para inflar el presupuesto base
 - Ninguna recomendación de snowball puede superar overflow_status.deployable_overflow
 
@@ -759,7 +740,7 @@ No llames create_milestone por condiciones que no se verificaron con datos reale
 10. Para gastos inciertos → create_transaction(pending) + send_telegram con botones
 11. Resolver subcategorías pendientes: get_transactions → asignar las que se puedan → agrupar ambiguas
 12. send_telegram → resumen con sección ⚙️ de gaps si aplica + sección 📂 de subcategorías pendientes si aplica
-13. Fin de mes (días 28–31): si no existe plan para el mes siguiente, agregar sección de alerta al resumen (puede ir dentro del mismo send_telegram del paso 12) con inline_keyboard de dos botones.
+13. Fin de mes (días 28–31): mencionarlo brevemente en el resumen ("Mayo empieza en X días"). Sin CTA, sin botones de wizard.
 
 ═══ RESUMEN FINAL ═══
 💰 <b>Revisión nocturna — {now_col.strftime("%d/%m/%Y")}</b>
