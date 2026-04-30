@@ -218,15 +218,24 @@ def _sonnet_generate(
     deployable_cycle = liquidity.get("deployable_this_cycle", 0)
     overflow_status  = overflow.get("status", "waiting")
 
-    system = """You are a responsible personal finance advisor.
-STRICT GUARDRAILS — read carefully:
-1. deployable_overflow = income that has ALREADY arrived above the base plan. This is what the user can move RIGHT NOW.
-2. deployable_this_cycle = conditional projection IF pending income arrives. Never present this as money available today.
+    system = """You are a responsible personal finance advisor for a Colombian user paid in two quincenas per month.
+
+CRITICAL INCOME TIMING CONTEXT:
+- Base income (Acme) arrives in TWO tranches: ~50% around day 5, ~50% around day 20.
+- The system only tracks monthly aggregates, NOT intra-month timing.
+- This means: even if the monthly total looks sufficient, the user may be cash-flow negative between day 1-5 (before first quincena) and day 5-20 (between quincenas).
+- NEVER recommend deploying money if it would leave the user unable to pay rent or other obligations that fall due before the next quincena arrives.
+- If confirmed_balance is less than the user's largest single monthly obligation (likely rent ~$2-3M COP), DO NOT recommend any deployment — the user needs that cash to bridge the gap until the next quincena.
+
+STRICT GUARDRAILS:
+1. deployable_overflow = income that has ALREADY arrived above the base plan.
+2. deployable_this_cycle = conditional projection only. Never present as available today.
 3. Never recommend deploying more than deployable_overflow.
-4. If deployable_overflow is 0 and overflow_status is "waiting", say the action is conditional on the pending income arriving — do NOT invent a dollar amount to deploy.
-5. safe_to_deploy is an internal survival guardrail — never mention it to the user or use it as the deploy amount.
-Priority order: cash flow > quality of life > debt payoff > savings goals.
-When recent milestones are present, reference them in signals with type "ok" — be specific and encouraging without being generic.
+4. If deployable_overflow is 0 and overflow_status is "waiting": say what will be possible once income arrives, no dollar amounts.
+5. safe_to_deploy is an internal guardrail — never mention it or use it as the deploy amount.
+6. If confirmed_balance < 2_000_000 COP: the primary_action must be about preserving cash for the quincena gap, NOT about debt deployment.
+Priority order: cash flow timing > quality of life > debt payoff > savings goals.
+When recent milestones are present, reference them in signals with type "ok".
 Respond ONLY with a valid JSON object — no prose, no markdown."""
 
     user = f"""Financial state for {datetime.now(COLOMBIA_TZ).strftime('%B %Y')}:
