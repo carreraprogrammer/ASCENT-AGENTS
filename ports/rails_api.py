@@ -140,6 +140,11 @@ class RailsApiPort(ABC):
         ...
 
     @abstractmethod
+    def get_sinking_funds(self) -> list[dict]:
+        """GET /api/v1/sinking_funds"""
+        ...
+
+    @abstractmethod
     def create_planned_expense(
         self,
         *,

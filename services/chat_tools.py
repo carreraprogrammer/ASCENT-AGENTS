@@ -95,6 +95,11 @@ def build_tools() -> list[dict[str, Any]]:
             "input_schema": {"type": "object", "properties": {}, "required": []},
         },
         {
+            "name": "get_sinking_funds",
+            "description": "Bolsillos activos para reservar dinero hacia gastos futuros o propósitos concretos. Incluye planned_expense_id cuando el bolsillo está vinculado a un planeado.",
+            "input_schema": {"type": "object", "properties": {}, "required": []},
+        },
+        {
             "name": "create_transactions",
             "description": (
                 "Crea múltiples transacciones en una sola llamada. "
@@ -127,6 +132,7 @@ def build_tools() -> list[dict[str, Any]]:
                                 "payment_source": {"type": "string", "enum": ["credit_card", "debit", "cash"]},
                                 "recurring_obligation_id": {"type": "integer"},
                                 "income_source_id": {"type": "integer"},
+                                "sinking_fund_id": {"type": "integer"},
                                 "metadata": {"type": "object"},
                             },
                             "required": ["date", "concept", "amount", "transaction_type", "status"],
@@ -144,6 +150,7 @@ def build_tools() -> list[dict[str, Any]]:
                 "La API espera date en DD/MM/YYYY o DD/MM. "
                 "Para ingresos esperados, podés incluir income_source_id; si lo omitís, la API intentará vincularlo por monto, fecha y concepto. "
                 "Para pagos de gastos recurrentes esperados, podés incluir recurring_obligation_id; si lo omitís, la API intentará vincularlo por monto y concepto. "
+                "Para aportes a bolsillos, podés incluir sinking_fund_id; si lo omitís, la API intentará vincularlo por monto y concepto. "
                 "Si el usuario dice que pagó una obligación por adelantado o para el siguiente mes, usa metadata con applies_to_month, applies_to_year, applies_to_period='YYYY-MM' y prepaid_obligation=true. "
                 "Si el usuario menciona con qué pagó (tarjeta, Nequi, efectivo, débito), incluí payment_source: "
                 "'credit_card' para cualquier tarjeta de crédito, 'debit' para débito/Nequi/transferencia, 'cash' para efectivo. "
@@ -167,6 +174,7 @@ def build_tools() -> list[dict[str, Any]]:
                     "payment_source": {"type": "string", "enum": ["credit_card", "debit", "cash"]},
                     "recurring_obligation_id": {"type": "integer"},
                     "income_source_id": {"type": "integer"},
+                    "sinking_fund_id": {"type": "integer"},
                 },
                 "required": ["date", "concept", "amount", "transaction_type", "status"],
             },
@@ -219,6 +227,7 @@ def build_tools() -> list[dict[str, Any]]:
                     "payment_source": {"type": "string", "enum": ["credit_card", "debit", "cash"]},
                     "recurring_obligation_id": {"type": "integer"},
                     "income_source_id": {"type": "integer"},
+                    "sinking_fund_id": {"type": "integer"},
                     "clarification_resolved_at": {"type": "string"},
                     "metadata": {"type": "object"},
                 },
@@ -882,6 +891,7 @@ def build_tool_map(
         "get_income_sources": lambda _: api.get_income_sources(),
         "get_recurring_obligations": lambda _: api.get_recurring_obligations(),
         "get_planned_expenses": lambda _: api.get_planned_expenses(),
+        "get_sinking_funds": lambda _: api.get_sinking_funds(),
         "create_transactions": _create_transactions,
         "create_transaction": _create_transaction,
         "record_debt_payment": _record_debt_payment,

@@ -225,6 +225,12 @@ class RailsHttpAdapter(RailsApiPort):
         data = self._get("/api/v1/planned_expenses")
         return data if isinstance(data, list) else data.get("data", [])
 
+    # --- sinking funds ---
+
+    def get_sinking_funds(self) -> list[dict]:
+        data = self._get("/api/v1/sinking_funds")
+        return data if isinstance(data, list) else data.get("data", [])
+
     def create_planned_expense(
         self,
         *,

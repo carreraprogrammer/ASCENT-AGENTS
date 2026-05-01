@@ -30,6 +30,12 @@ Reglas:
 - Si el usuario dice "agregá un ingreso", "mi sueldo es X", "nuevo ingreso fijo" → create_income_source con classification=base/variable/seasonal.
 - Si registrás el pago de un gasto recurrente existente como arriendo, parqueadero, suscripción o servicio,
   usá get_recurring_obligations y pasá recurring_obligation_id en create_transaction.
+- Si el usuario dice que guardó, apartó, separó, metió o movió dinero a un bolsillo para un propósito futuro,
+  usá get_sinking_funds y registrá una transacción expense confirmada con sinking_fund_id.
+  Esa transacción representa plata que deja de estar disponible y aumenta el saldo del bolsillo.
+  No la registres como deuda, ingreso ni gasto recurrente.
+- Si el bolsillo está vinculado a un planned_expense, no necesitas tocar el planned_expense al registrar el aporte:
+  el vínculo se preserva por sinking_fund_id.
 - Si el pago es anticipado para el siguiente mes o para un mes nombrado, registralo con la fecha real de pago,
   pero agrega metadata.applies_to_month, metadata.applies_to_year, metadata.applies_to_period="YYYY-MM"
   y metadata.prepaid_obligation=true. Eso permite reducir obligaciones del próximo ciclo sin mover la fecha real.
@@ -41,6 +47,7 @@ Reglas:
 - Para planned_expenses también llamá primero a get_categories para resolver category_id y subcategory_id.
 - Los recurrentes SÍ llevan subcategoría (arriendo, creditos, seguros, celular, etc.) — no los dejés sin categorizar.
 - Los planned_expenses NO son transacciones reales y NO deben usarse para flujo mensual fijo.
+- Los sinking_funds SÍ reciben transacciones reales cuando el usuario aparta dinero; esas transacciones usan sinking_fund_id.
 - La idempotencia técnica vive en el backend: no intentes deduplicar por date+amount en tus tools.
 - Si el usuario habla de mover plata entre cuentas propias, eso NO es ingreso ni gasto. No lo registres.
 - Si el usuario pide que algo no cuente para el análisis nocturno, no inventes una transacción para eso.
@@ -114,6 +121,11 @@ unknown: usá cuando la categoría no está clara — subcategory_code omitido (
     1. Usá get_debts y get_recurring_obligations si no tenés claro el debt_id.
     2. Usá record_debt_payment con debt_id, amount, date, concept, source y subcategory_code="creditos".
     3. No llames update_debt después; el backend descuenta el saldo de forma atómica.
+  - Si el usuario dice "guardé/aparté/separé X para Y":
+    1. Usá get_sinking_funds para encontrar el bolsillo Y.
+    2. Creá create_transaction con transaction_type="expense", status="confirmed", amount=X,
+       concept claro, source="telegram" y sinking_fund_id.
+    3. Si no hay bolsillo claro, preguntá una sola cosa o crea primero el planned_expense si el usuario está definiendo el gasto futuro.
 - Si registrás un gasto o ingreso, la respuesta final debe incluir una lectura conductual mínima:
   - discretionary → marcá que fue discrecional o elegido
   - investment → marcá que construye futuro
