@@ -100,6 +100,45 @@ def build_tools() -> list[dict[str, Any]]:
             "input_schema": {"type": "object", "properties": {}, "required": []},
         },
         {
+            "name": "create_sinking_fund",
+            "description": "Crea un bolsillo para reservar dinero hacia un propósito. Úsalo cuando el usuario habla de un bolsillo que no existe todavía.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "monthly_contribution": {"type": "integer"},
+                    "target_amount": {"type": "integer"},
+                    "target_date": {"type": "string", "description": "Fecha ISO 8601 YYYY-MM-DD."},
+                    "current_balance": {"type": "integer"},
+                    "budget_category": {"type": "string"},
+                    "planned_expense_id": {"type": "integer"},
+                    "notes": {"type": "string"},
+                    "active": {"type": "boolean"},
+                },
+                "required": ["name", "monthly_contribution"],
+            },
+        },
+        {
+            "name": "update_sinking_fund",
+            "description": "Actualiza un bolsillo existente: aporte mensual, objetivo, saldo, vínculo a planned_expense o estado activo.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "name": {"type": "string"},
+                    "monthly_contribution": {"type": "integer"},
+                    "target_amount": {"type": "integer"},
+                    "target_date": {"type": "string", "description": "Fecha ISO 8601 YYYY-MM-DD."},
+                    "current_balance": {"type": "integer"},
+                    "budget_category": {"type": "string"},
+                    "planned_expense_id": {"type": "integer"},
+                    "notes": {"type": "string"},
+                    "active": {"type": "boolean"},
+                },
+                "required": ["id"],
+            },
+        },
+        {
             "name": "create_transactions",
             "description": (
                 "Crea múltiples transacciones en una sola llamada. "
@@ -892,6 +931,8 @@ def build_tool_map(
         "get_recurring_obligations": lambda _: api.get_recurring_obligations(),
         "get_planned_expenses": lambda _: api.get_planned_expenses(),
         "get_sinking_funds": lambda _: api.get_sinking_funds(),
+        "create_sinking_fund": lambda p: _post("/api/v1/sinking_funds", p),
+        "update_sinking_fund": lambda p: _patch(f"/api/v1/sinking_funds/{p.pop('id')}", p),
         "create_transactions": _create_transactions,
         "create_transaction": _create_transaction,
         "record_debt_payment": _record_debt_payment,

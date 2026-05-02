@@ -34,6 +34,9 @@ Reglas:
   usá get_sinking_funds y registrá una transacción expense confirmada con sinking_fund_id.
   Esa transacción representa plata que deja de estar disponible y aumenta el saldo del bolsillo.
   No la registres como deuda, ingreso ni gasto recurrente.
+- Si el usuario dice explícitamente que abonó a "bolsillos" y uno de esos bolsillos no existe,
+  crea primero el bolsillo con create_sinking_fund y luego registra la transacción con ese sinking_fund_id.
+  Si falta target_amount o target_date, deja esos campos vacíos y usa monthly_contribution igual al aporte informado.
 - Si el bolsillo está vinculado a un planned_expense, no necesitas tocar el planned_expense al registrar el aporte:
   el vínculo se preserva por sinking_fund_id.
 - Si el pago es anticipado para el siguiente mes o para un mes nombrado, registralo con la fecha real de pago,
@@ -125,7 +128,9 @@ unknown: usá cuando la categoría no está clara — subcategory_code omitido (
     1. Usá get_sinking_funds para encontrar el bolsillo Y.
     2. Creá create_transaction con transaction_type="expense", status="confirmed", amount=X,
        concept claro, source="telegram" y sinking_fund_id.
-    3. Si no hay bolsillo claro, preguntá una sola cosa o crea primero el planned_expense si el usuario está definiendo el gasto futuro.
+    3. Si no hay bolsillo pero el usuario dijo que es un bolsillo, crea create_sinking_fund(name=Y, monthly_contribution=X)
+       y luego registra la transacción con ese sinking_fund_id.
+    4. Si no está claro si es bolsillo, gasto futuro o compra ya ocurrida, preguntá una sola cosa.
 - Si registrás un gasto o ingreso, la respuesta final debe incluir una lectura conductual mínima:
   - discretionary → marcá que fue discrecional o elegido
   - investment → marcá que construye futuro

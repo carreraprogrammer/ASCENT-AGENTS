@@ -145,6 +145,16 @@ class RailsApiPort(ABC):
         ...
 
     @abstractmethod
+    def create_sinking_fund(self, **attrs) -> dict:
+        """POST /api/v1/sinking_funds"""
+        ...
+
+    @abstractmethod
+    def update_sinking_fund(self, sinking_fund_id: int | str, **attrs) -> dict:
+        """PATCH /api/v1/sinking_funds/:id"""
+        ...
+
+    @abstractmethod
     def create_planned_expense(
         self,
         *,

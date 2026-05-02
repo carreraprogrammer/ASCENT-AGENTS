@@ -231,6 +231,13 @@ class RailsHttpAdapter(RailsApiPort):
         data = self._get("/api/v1/sinking_funds")
         return data if isinstance(data, list) else data.get("data", [])
 
+    def create_sinking_fund(self, **attrs) -> dict:
+        result = self._post("/api/v1/sinking_funds", attrs)
+        return result.get("data", result) if isinstance(result, dict) else result
+
+    def update_sinking_fund(self, sinking_fund_id: int | str, **attrs) -> dict:
+        return self._patch(f"/api/v1/sinking_funds/{sinking_fund_id}", attrs)
+
     def create_planned_expense(
         self,
         *,
