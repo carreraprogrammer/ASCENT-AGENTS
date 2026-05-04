@@ -112,6 +112,52 @@ def _flatten_transaction(t: dict) -> dict:
     }
 
 
+def _infer_payment_source(payload: dict) -> str | None:
+    if payload.get("transaction_type") != "expense":
+        return None
+
+    metadata = payload.get("metadata") or {}
+    text = " ".join(
+        str(value)
+        for value in [
+            payload.get("concept"),
+            payload.get("product"),
+            metadata.get("payment_source"),
+            metadata.get("payment_method"),
+            metadata.get("card"),
+            metadata.get("raw_text"),
+            metadata.get("subject"),
+        ]
+        if value
+    ).lower()
+
+    if re.search(r"\btc\s*\d{3,4}\b", text):
+        return "credit_card"
+    if re.search(r"tarjeta\s+de\s+cr[eé]dito|tarjeta\s+credito|credit\s+card", text):
+        return "credit_card"
+    if re.search(r"\bnequi\b|d[eé]bito|debito|transferencia|cuenta\s+de\s+ahorros", text):
+        return "debit"
+    if re.search(r"efectivo|cash", text):
+        return "cash"
+
+    return None
+
+
+def _normalize_transaction_payload(payload: dict) -> dict:
+    normalized = dict(payload)
+    payment_source = normalized.get("payment_source") or _infer_payment_source(normalized)
+
+    if payment_source:
+        normalized["payment_source"] = payment_source
+
+    if payment_source == "credit_card":
+        normalized["credit_card_status"] = normalized.get("credit_card_status") or "pending"
+    else:
+        normalized.pop("credit_card_status", None)
+
+    return normalized
+
+
 def build_tool_map(api: RailsApiPort, messenger: MessengerPort) -> dict:
     now_col = datetime.now(COLOMBIA_TZ)
 
@@ -212,17 +258,20 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort) -> dict:
     def create_transaction(inp: dict) -> dict:
         try:
             import httpx
+            payload = _normalize_transaction_payload(inp)
             r = httpx.post(
                 f"{API_BASE_URL}/api/v1/transactions",
                 headers=build_auth_headers(),
-                json=inp, timeout=15,
+                json=payload, timeout=15,
             )
             if r.status_code == 201:
                 data = r.json()["data"]
                 return {"ok": True, "created": True, "id": data["id"],
                         "concept": data["attributes"]["concept"],
                         "amount": data["attributes"]["amount"],
-                        "status": data["attributes"]["status"]}
+                        "status": data["attributes"]["status"],
+                        "payment_source": data["attributes"].get("payment_source"),
+                        "credit_card_status": data["attributes"].get("credit_card_status")}
             if r.status_code == 409:
                 body = r.json()
                 return {"ok": True, "created": False, "already_existed": True,
@@ -375,6 +424,9 @@ TOOLS = [
             "Registra una transacción nueva. "
             "Si devuelve already_existed=true (HTTP 409), la transacción YA EXISTE — no volver a intentar, no es un error. "
             "La dedup la maneja la API: mismo date+amount+product+tipo = rechazado para fuentes telegram/gmail. "
+            "Incluí payment_source cuando el correo indique el medio de pago: credit_card para compras con tarjeta de crédito, "
+            "debit para débito/Nequi/transferencia/cuenta de ahorros, cash para efectivo. "
+            "Para payment_source=credit_card, incluí credit_card_status=pending. "
             "Para ingresos esperados, podés pasar income_source_id; si no, la API intentará vincularlos automáticamente. "
             "Para pagos de obligaciones recurrentes esperadas, podés pasar recurring_obligation_id. "
             "Si el pago corresponde a otro mes, agregá metadata.applies_to_month/year y prepaid_obligation=true."
@@ -388,6 +440,8 @@ TOOLS = [
                 "amount":           {"type": "integer"},
                 "transaction_type": {"type": "string", "enum": ["expense", "income"]},
 	                "status":           {"type": "string", "enum": ["confirmed", "pending"]},
+	                "payment_source":   {"type": "string", "enum": ["credit_card", "debit", "cash"]},
+	                "credit_card_status": {"type": "string", "enum": ["pending", "settled"]},
 	                "income_source_id": {"type": "integer"},
 	                "recurring_obligation_id": {"type": "integer"},
 	                "metadata":         {"type": "object"},
@@ -617,6 +671,13 @@ unknown: usá cuando la categoría no está clara — subcategory_code = null
 - El usuario siempre puede cambiar la clasificación después
 
 ═══ REGLA CRÍTICA — PAGOS A TARJETA DE CRÉDITO ═══
+Cuando Gmail muestra una COMPRA hecha con tarjeta de crédito:
+- Registrar la compra individual con create_transaction
+- Usar payment_source="credit_card" y credit_card_status="pending"
+- Son señales suficientes: product/cuerpo/asunto con patrón genérico "TC" + 3-4 dígitos, "tarjeta de crédito", "tarjeta credito" o "credit card"
+- No dependas de nombres de comercios, bancos específicos ni últimos dígitos reales codificados
+- El product debe guardar el identificador genérico que venga en el correo (por ejemplo, el alias de producto financiero), sin inventar una tarjeta
+
 Cuando Gmail muestra "Abono TC", "Pago TC", "Pago tarjeta", "Pago mínimo", "se han abonado":
 - NO crear transacción de gasto — las compras individuales ya están registradas con payment_source=credit_card
 - Extraer el monto del abono del email (número en COP)
