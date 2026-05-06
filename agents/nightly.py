@@ -335,6 +335,44 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort) -> dict:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def get_debts(_input: dict) -> dict:
+        import httpx
+        try:
+            r = httpx.get(
+                f"{API_BASE_URL}/api/v1/debts",
+                headers=build_auth_headers(),
+                timeout=15,
+            )
+            r.raise_for_status()
+            items = r.json().get("data", [])
+            debts = [
+                {
+                    "id":              d.get("id"),
+                    "name":            d.get("attributes", d).get("name"),
+                    "status":          d.get("attributes", d).get("status"),
+                    "current_balance": d.get("attributes", d).get("current_balance"),
+                    "monthly_payment": d.get("attributes", d).get("monthly_payment"),
+                }
+                for d in items
+            ]
+            active = [d for d in debts if d["status"] == "active"]
+            paid   = [d for d in debts if d["status"] == "paid_off"]
+            total_balance   = sum(d["current_balance"] or 0 for d in active)
+            monthly_payment = sum(d["monthly_payment"] or 0 for d in active)
+            months_left = round(total_balance / monthly_payment) if monthly_payment > 0 else None
+            return {
+                "ok":             True,
+                "debts":          debts,
+                "total":          len(debts),
+                "active_count":   len(active),
+                "paid_off_count": len(paid),
+                "total_balance":  total_balance,
+                "monthly_payment": monthly_payment,
+                "months_to_payoff": months_left,
+            }
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     return {
         "get_completeness":              get_completeness,
         "get_telegram_messages":         get_telegram_messages,
@@ -343,6 +381,7 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort) -> dict:
         "get_balance":                   get_balance,
         "get_pending_transactions":      get_pending_transactions,
         "get_summary":                   get_summary,
+        "get_debts":                     get_debts,
         "create_transaction":            create_transaction,
         "update_transaction":            update_transaction,
         "settle_credit_card_payments":   settle_credit_card_payments,
@@ -534,6 +573,15 @@ TOOLS = [
             },
             "required": ["question", "options"],
         },
+    },
+    {
+        "name": "get_debts",
+        "description": (
+            "Devuelve todas las deudas con estado, saldo y cuota mensual. "
+            "Llámalo cuando financial_context.phase=debt_payoff para calcular ritmo de liquidación. "
+            "La respuesta incluye active_count, paid_off_count y months_to_payoff calculados."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
     },
     {
         "name": "create_milestone",
@@ -776,6 +824,14 @@ Si get_telegram_messages devuelve resolved_callbacks:
 
 ═══ ALERTA FIN DE MES ═══
 {alert_block}
+
+═══ NARRATIVA DE PROGRESO EN DEUDAS ═══
+Si financial_context.phase == "debt_payoff":
+- Llamá get_debts después de get_summary.
+- Calculá y mencioná en el resumen: "X/Y deudas liquidadas. A este ritmo, faltan ~Z meses."
+  X = paid_off_count, Y = active_count + paid_off_count, Z = months_to_payoff.
+- Si months_to_payoff es null (no hay pagos registrados), omití el estimado de meses.
+- Ubicalo al final del resumen financiero, antes de las alertas de presupuesto.
 
 ═══ DETECCIÓN AUTOMÁTICA DE HITOS ═══
 Durante la revisión nocturna, después de obtener get_summary y get_balance, verificá si alguna condición de hito aplica para HOY y llamá create_milestone si corresponde. Es idempotente — si ya existe para el día, no pasa nada.
