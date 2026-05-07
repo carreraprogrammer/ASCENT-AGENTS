@@ -17,6 +17,7 @@ from pydantic import BaseModel
 
 from adapters.rails_http import RailsHttpAdapter
 from adapters.telegram_messenger import TelegramMessenger
+from agents.app_chat import handle_app_chat
 from agents.nightly import run_nightly
 from agents.web_chat import handle_web_chat
 from agents.insight import run_insight_refresh
@@ -75,6 +76,20 @@ async def web_chat(body: WebChatRequest, background_tasks: BackgroundTasks) -> d
         message=body.message,
         event_response=body.event_response,
         budget_context=body.budget_context,
+    )
+    return {"ok": True, "session_id": body.session_id}
+
+
+@router.post("/app_chat", dependencies=[Depends(_verify_service_token)])
+async def app_chat(body: WebChatRequest, background_tasks: BackgroundTasks) -> dict:
+    """Canal app → mismo agente conversacional de Telegram, con messenger visual."""
+    api = RailsHttpAdapter()
+    background_tasks.add_task(
+        handle_app_chat,
+        api=api,
+        session_id=body.session_id,
+        message=body.message,
+        event_response=body.event_response,
     )
     return {"ok": True, "session_id": body.session_id}
 
