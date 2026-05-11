@@ -58,8 +58,6 @@ def handle(api: RailsApiPort, messenger: MessengerPort, data: str) -> None:
         txn_id, payment_source = parts[1], parts[2]
         try:
             kwargs: dict = {"payment_source": payment_source}
-            if payment_source == "credit_card":
-                kwargs["credit_card_status"] = "pending"
             result = api.update_transaction(txn_id, **kwargs)
             attrs = result.get("data", {}).get("attributes", result)
             concept = attrs.get("concept", "transacción")
