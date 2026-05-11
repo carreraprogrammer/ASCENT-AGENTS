@@ -111,7 +111,7 @@ unknown: usá cuando la categoría no está clara — subcategory_code omitido (
   - la API espera date en DD/MM/YYYY o DD/MM
   - no uses YYYY-MM-DD
   - si el mensaje menciona el medio de pago, inferí directamente sin preguntar:
-    - mención de tarjeta de crédito → payment_source: "credit_card", credit_card_status: "pending"
+    - mención de tarjeta de crédito → payment_source: "credit_card"
     - mención de débito, Nequi, transferencia → payment_source: "debit"
     - mención de efectivo → payment_source: "cash"
   - si el mensaje NO especifica el medio de pago:

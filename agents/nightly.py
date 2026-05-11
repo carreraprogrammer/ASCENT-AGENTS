@@ -150,10 +150,7 @@ def _normalize_transaction_payload(payload: dict) -> dict:
     if payment_source:
         normalized["payment_source"] = payment_source
 
-    if payment_source == "credit_card":
-        normalized["credit_card_status"] = normalized.get("credit_card_status") or "pending"
-    else:
-        normalized.pop("credit_card_status", None)
+    normalized.pop("credit_card_status", None)
 
     return normalized
 
@@ -270,8 +267,7 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort) -> dict:
                         "concept": data["attributes"]["concept"],
                         "amount": data["attributes"]["amount"],
                         "status": data["attributes"]["status"],
-                        "payment_source": data["attributes"].get("payment_source"),
-                        "credit_card_status": data["attributes"].get("credit_card_status")}
+                        "payment_source": data["attributes"].get("payment_source")}
             if r.status_code == 409:
                 body = r.json()
                 return {"ok": True, "created": False, "already_existed": True,
@@ -384,7 +380,6 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort) -> dict:
         "get_debts":                     get_debts,
         "create_transaction":            create_transaction,
         "update_transaction":            update_transaction,
-        "settle_credit_card_payments":   settle_credit_card_payments,
         "send_telegram":                 send_telegram,
         "send_poll":                     send_poll,
         "create_milestone":              lambda p: api.create_milestone(p["code"], p.get("metadata", {})),
@@ -465,7 +460,6 @@ TOOLS = [
             "La dedup la maneja la API: mismo date+amount+product+tipo = rechazado para fuentes telegram/gmail. "
             "Incluí payment_source cuando el correo indique el medio de pago: credit_card para compras con tarjeta de crédito, "
             "debit para débito/Nequi/transferencia/cuenta de ahorros, cash para efectivo. "
-            "Para payment_source=credit_card, incluí credit_card_status=pending. "
             "Para ingresos esperados, podés pasar income_source_id; si no, la API intentará vincularlos automáticamente. "
             "Para pagos de obligaciones recurrentes esperadas, podés pasar recurring_obligation_id. "
             "Si el pago corresponde a otro mes, agregá metadata.applies_to_month/year y prepaid_obligation=true."
@@ -480,7 +474,6 @@ TOOLS = [
                 "transaction_type": {"type": "string", "enum": ["expense", "income"]},
 	                "status":           {"type": "string", "enum": ["confirmed", "pending"]},
 	                "payment_source":   {"type": "string", "enum": ["credit_card", "debit", "cash"]},
-	                "credit_card_status": {"type": "string", "enum": ["pending", "settled"]},
 	                "income_source_id": {"type": "integer"},
 	                "recurring_obligation_id": {"type": "integer"},
 	                "metadata":         {"type": "object"},
@@ -544,22 +537,6 @@ TOOLS = [
                 },
             },
             "required": ["mensaje"],
-        },
-    },
-    {
-        "name": "settle_credit_card_payments",
-        "description": (
-            "Liquida compras de tarjeta de crédito pendientes de pago al banco. "
-            "Llamar cuando Gmail detecta un abono/pago a TC. "
-            "Nunca crear una transacción de gasto para un abono a TC — usar este tool en su lugar. "
-            "Marca las compras pendientes como pagadas en orden FIFO hasta agotar el monto del abono."
-        ),
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "amount": {"type": "integer", "description": "Monto del abono en COP (entero positivo)"},
-            },
-            "required": ["amount"],
         },
     },
     {
@@ -718,31 +695,12 @@ unknown: usá cuando la categoría no está clara — subcategory_code = null
 - Para montos menores a 50.000 COP con contexto claro, no preguntar — clasificar directamente
 - El usuario siempre puede cambiar la clasificación después
 
-═══ REGLA CRÍTICA — PAGOS A TARJETA DE CRÉDITO ═══
-Cuando Gmail muestra una COMPRA hecha con tarjeta de crédito:
-- Registrar la compra individual con create_transaction
-- Usar payment_source="credit_card" y credit_card_status="pending"
-- Son señales suficientes: product/cuerpo/asunto con patrón genérico "TC" + 3-4 dígitos, "tarjeta de crédito", "tarjeta credito" o "credit card"
-- No dependas de nombres de comercios, bancos específicos ni últimos dígitos reales codificados
-- El product debe guardar el identificador genérico que venga en el correo (por ejemplo, el alias de producto financiero), sin inventar una tarjeta
+═══ REGLA — TARJETA DE CRÉDITO ═══
+Compras con TC: registrar con create_transaction y payment_source="credit_card". El gasto se imputa al momento de la compra, como cualquier otro gasto confirmado.
 
-Cuando Gmail muestra "Abono TC", "Pago TC", "Pago tarjeta", "Pago mínimo", "se han abonado":
-- NO crear transacción de gasto — las compras individuales ya están registradas con payment_source=credit_card
-- Extraer el monto del abono del email (número en COP)
-- Llamar settle_credit_card_payments(amount=monto_del_abono)
-- El sistema marcará como pagadas las compras más antiguas pendientes en orden FIFO
-- Reportar en el resumen: "Abono de $X a TC — N compras saldadas, quedan $Y pendientes"
-- Si settled_count == 0: "No había compras de TC pendientes registradas en el sistema"
-- NUNCA crear un gasto por el abono, NUNCA descomponer el abono en compras individuales
+Abonos/pagos al banco (email dice "Abono TC", "Pago TC", "Pago tarjeta", "se han abonado", "pago mínimo", o similar): NO crear transacción — es una transferencia entre el banco y la tarjeta, no un gasto nuevo. Ignorar.
 
-═══ REGLA — CUOTAS DE DEUDA EN TARJETA DE CRÉDITO ═══
-Las deudas diferidas en TC (ej. compra de celular en cuotas a 0%) NO son compras nuevas.
-Cuando Gmail muestra el débito mensual de una cuota (deuda diferida en TC, ej. un celular a cuotas a 0%):
-- NO llamar settle_credit_card_payments — la cuota ya está en el modelo de deuda
-- Si se registra como transacción, usar payment_source: "debit" (es plata saliendo de la
-  cuenta de ahorros para servir la deuda), nunca payment_source: "credit_card"
-- Una cuota mensual de deuda diferida es una obligación estructural ya capturada como
-  Debt + recurring_obligation, no una compra cotidiana en crédito
+Cuotas de deuda diferida en TC (celular a cuotas, etc.): registrar con payment_source="debit" — es plata saliendo de la cuenta de ahorros para servir una deuda ya capturada como Debt + recurring_obligation.
 
 ═══ DEDUPLICACIÓN ═══
 1. Telegram + Gmail mismo gasto → registrar UNA sola vez
