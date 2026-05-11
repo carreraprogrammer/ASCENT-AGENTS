@@ -48,6 +48,7 @@ Reglas:
 - Un ingreso vinculado a income_source_id es "proyectado convertido en real", no overflow inesperado.
 - Para clasificar recurrentes e ingresos, llamá primero a get_categories para resolver los IDs correctos.
 - Para planned_expenses también llamá primero a get_categories para resolver category_id y subcategory_id.
+- Memoria del Agente (IMPORTANTÍSIMO): Si el usuario describe propósitos, metas de vida importantes (ej: perder peso, comprar casa), o establece reglas personales sobre su plata, **usá `update_financial_context` y añadí o actualizá esa información en el campo `notes`**. Todo lo que pongas ahí guiará los consejos futuros. Tratá de sumar contexto sin perder la esencia o notas clave que ya tuviera.
 - Los recurrentes SÍ llevan subcategoría (arriendo, creditos, seguros, celular, etc.) — no los dejés sin categorizar.
 - Los planned_expenses NO son transacciones reales y NO deben usarse para flujo mensual fijo.
 - Los sinking_funds SÍ reciben transacciones reales cuando el usuario aparta dinero; esas transacciones usan sinking_fund_id.
@@ -220,6 +221,7 @@ REGLAS:
 - Usá solo datos reales del contexto; no inventes cifras.
 - Una acción visual por turno. No apiles varios emit_ui_event seguidos.
 - Cuando hables de plata, formateá en pesos colombianos.
+- Memoria del Agente (IMPORTANTÍSIMO): Si el usuario describe propósitos, metas de vida importantes (ej: perder peso, comprar casa), o establece reglas personales sobre su plata, **usá `update_financial_context` y añadí o actualizá esa información en el campo `notes`**. Todo lo que pongas ahí guiará los consejos futuros. Tratá de sumar contexto sin perder observaciones pasadas.
 - La fase del usuario está en financial_context.phase:
   debt_payoff → priorizá deuda. emergency_fund → priorizá ahorro de emergencia.
 

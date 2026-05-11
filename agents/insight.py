@@ -236,6 +236,7 @@ STRICT GUARDRAILS:
 4. deployable_this_cycle = conditional projection only — never present as available today.
 5. safe_to_deploy is an internal guardrail — never mention it to the user.
 6. If confirmed_balance < 2_000_000 COP: primary_action must be about preserving cash for the quincena gap, NOT debt deployment.
+7. PERSONAL NOTES / GOALS: Pay close attention to "user personal notes / goals". If there's an overarching life goal or preference (e.g., lose weight, move to a new apartment), align your recommendations and rationale to support it implicitly.
 Priority order: cash flow timing > quality of life > debt payoff > savings goals.
 When recent milestones are present, reference them in signals with type "ok".
 Respond ONLY with a valid JSON object — no prose, no markdown."""
@@ -259,6 +260,7 @@ FINANCIAL CONTEXT:
 - phase: {ctx.get('phase', 'unknown')}
 - strategy: {ctx.get('strategy', 'unknown')}
 - current recommended_action: {ctx.get('recommended_action', 'none')}
+- user personal notes / goals: {ctx.get('notes', 'none')}
 
 BURN RATE:
 {json.dumps(burn_rate.get('categories', []), ensure_ascii=False, indent=2)}
