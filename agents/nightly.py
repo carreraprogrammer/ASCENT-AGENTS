@@ -369,7 +369,39 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort) -> dict:
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def get_night_metrics(_input: dict) -> dict:
+        """Pre-contextualiza los datos del día: clasifica transacciones como matched/unmatched."""
+        import httpx
+        today = now_col.date().isoformat()
+        try:
+            r = httpx.get(
+                f"{API_BASE_URL}/api/v1/night_analyses/metrics",
+                headers=build_auth_headers(),
+                params={"date": today},
+                timeout=20,
+            )
+            r.raise_for_status()
+            return {"ok": True, **r.json().get("data", {})}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    def create_night_analysis(inp: dict) -> dict:
+        """Persiste el análisis nocturno + insight del dashboard. Llamar al FINAL del ciclo."""
+        import httpx
+        try:
+            r = httpx.post(
+                f"{API_BASE_URL}/api/v1/night_analyses",
+                headers=build_auth_headers(),
+                json=inp,
+                timeout=30,
+            )
+            r.raise_for_status()
+            return {"ok": True, **r.json().get("data", {})}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     return {
+        "get_night_metrics":             get_night_metrics,
         "get_completeness":              get_completeness,
         "get_telegram_messages":         get_telegram_messages,
         "get_gmail_emails":              get_gmail_emails,
@@ -383,12 +415,24 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort) -> dict:
         "send_telegram":                 send_telegram,
         "send_poll":                     send_poll,
         "create_milestone":              lambda p: api.create_milestone(p["code"], p.get("metadata", {})),
+        "create_night_analysis":         create_night_analysis,
     }
 
 
 # ── Herramientas para Claude ──────────────────────────────────────────────────
 
 TOOLS = [
+    {
+        "name": "get_night_metrics",
+        "description": (
+            "Pre-contextualiza los datos del día antes de procesar Gmail/Telegram. "
+            "Devuelve transactions_context.matched (gastos ESPERADOS con recurring_obligation — NO alarmar), "
+            "transactions_context.unmatched (gastos sin obligación — revisar), "
+            "category_alerts (estado por categoría vs presupuesto) y health_status/commitment_gap. "
+            "Llamar PRIMERO, antes de get_gmail_emails."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
     {
         "name": "get_completeness",
         "description": (
@@ -559,6 +603,44 @@ TOOLS = [
             "La respuesta incluye active_count, paid_off_count y months_to_payoff calculados."
         ),
         "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "create_night_analysis",
+        "description": (
+            "Persiste el análisis nocturno completo + el insight del dashboard. "
+            "Llamar SIEMPRE al FINAL del ciclo, después de send_telegram. "
+            "insight.title y body: 1-2 oraciones de coaching directo. "
+            "kind = congratulation si comfortable, alert si critical/warning, tip para el resto."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "date": {"type": "string", "description": "YYYY-MM-DD"},
+                "metrics": {
+                    "type": "object",
+                    "properties": {
+                        "health_status":      {"type": "string", "enum": ["comfortable", "warning", "critical"]},
+                        "commitment_gap":     {"type": "integer"},
+                        "daily_burn":         {"type": "integer"},
+                        "days_to_next_income": {"type": "integer"},
+                        "category_alerts":   {"type": "array"},
+                        "transactions_context": {"type": "object"},
+                    },
+                    "required": ["health_status", "commitment_gap", "daily_burn"],
+                },
+                "agent_reasoning": {"type": "string"},
+                "insight": {
+                    "type": "object",
+                    "properties": {
+                        "kind":  {"type": "string", "enum": ["tip", "congratulation", "alert", "proposal", "achievement"]},
+                        "title": {"type": "string"},
+                        "body":  {"type": "string"},
+                    },
+                    "required": ["kind", "title", "body"],
+                },
+            },
+            "required": ["date", "metrics", "insight"],
+        },
     },
     {
         "name": "create_milestone",
@@ -801,20 +883,31 @@ Condiciones a revisar:
 
 No llames create_milestone por condiciones que no se verificaron con datos reales de la API.
 
+═══ TRANSACCIONES ESPERADAS (NO alarmar) ═══
+get_night_metrics devuelve transactions_context.matched: gastos del día que YA tienen recurring_obligation_id (arriendo, crédito, seguro, etc.).
+- Son ESPERADOS — el usuario los programó previamente. No mencionarlos como alertas en Telegram.
+- Solo mencionar si el delta es > 5% del monto esperado (ej: pagaron $2.6M en lugar de $2.5M → mencionarlo).
+- transactions_context.unmatched = gastos sin obligación → estos sí necesitan lectura conductual.
+
 ═══ FLUJO RECOMENDADO ═══
-1. get_completeness → detectar gaps de contexto ANTES de todo
-2. get_summary → alertas de presupuesto + estado plan quincenal + overflow si aplica
-3. get_telegram_messages → transacciones ya registradas hoy desde el chat (source=telegram)
-4. get_gmail_emails → cargos bancarios del día
-5. Cruzar Gmail vs Telegram: si coinciden monto+producto → mismo gasto, NO duplicar
-6. get_transactions → lista completa del mes para dedup adicional (NO para balance)
-7. get_balance → balance real (SIEMPRE antes del resumen)
-8. get_pending_transactions → pendientes de días anteriores
-9. Registrar solo los gastos de Gmail que NO estén ya en Telegram/transactions → create_transaction
-10. Para gastos inciertos → create_transaction(pending) + send_telegram con botones
-11. Resolver subcategorías pendientes: get_transactions → asignar las que se puedan → agrupar ambiguas
-12. send_telegram → resumen con sección ⚙️ de gaps si aplica + sección 📂 de subcategorías pendientes si aplica
-13. Fin de mes (días 28–31): mencionarlo brevemente en el resumen ("Mayo empieza en X días"). Sin CTA, sin botones de wizard.
+1. get_night_metrics → pre-contextualizar: saber qué transacciones son ESPERADAS antes de procesar Gmail
+2. get_completeness → detectar gaps de contexto
+3. get_summary → alertas de presupuesto + estado plan quincenal + overflow si aplica
+4. get_telegram_messages → transacciones ya registradas hoy desde el chat (source=telegram)
+5. get_gmail_emails → cargos bancarios del día
+6. Cruzar Gmail vs Telegram: si coinciden monto+producto → mismo gasto, NO duplicar
+7. Si una transacción en Gmail coincide con una en transactions_context.matched → también es esperada, NO alarmar
+8. get_transactions → lista completa del mes para dedup adicional (NO para balance)
+9. get_balance → balance real (SIEMPRE antes del resumen)
+10. get_pending_transactions → pendientes de días anteriores
+11. Registrar solo los gastos de Gmail que NO estén ya en Telegram/transactions → create_transaction
+12. Para gastos inciertos → create_transaction(pending) + send_telegram con botones
+13. Resolver subcategorías pendientes: get_transactions → asignar las que se puedan → agrupar ambiguas
+14. send_telegram → resumen con sección ⚙️ de gaps si aplica + sección 📂 de subcategorías pendientes si aplica
+15. Fin de mes (días 28–31): mencionarlo brevemente en el resumen ("Mayo empieza en X días"). Sin CTA, sin botones de wizard.
+16. create_night_analysis → SIEMPRE al final. Persistir análisis + insight del dashboard.
+    insight.kind = congratulation si comfortable y balance positivo | alert si critical o warning con gap negativo | achievement si hay milestone reciente | tip para el resto.
+    insight.title y body: 1-2 oraciones de coaching directo en español, basadas en datos reales.
 
 ═══ RESUMEN FINAL ═══
 💰 <b>Revisión nocturna — {now_col.strftime("%d/%m/%Y")}</b>

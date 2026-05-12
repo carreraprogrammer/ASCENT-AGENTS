@@ -3,13 +3,13 @@ agents/insight.py — Daily insight generator with drift guard.
 
 Flow:
   1. GET /api/v1/summary  — current financial state
-  2. GET /api/v1/agent_insights/current  — last persisted insight
+  2. GET /api/v1/agent_insights/latest  — last persisted insight
   3. Drift check (Python, $0)
   4. If stable → skip
   5. If should_refresh AND last_insight exists → Haiku validity check (~$0.001)
   6. If still_valid → skip
   7. Sonnet structured generation (~$0.01-0.02)
-  8. POST /api/v1/agent_insights
+  8. POST /api/v1/night_analyses  — stores NightAnalysis + AgentInsight atomically
 """
 
 from __future__ import annotations
@@ -41,20 +41,21 @@ def _should_refresh(current: dict, last_insight: dict | None, today: datetime) -
     if last_insight is None:
         return True, "initial"
 
-    snap = last_insight.get("key_metrics_snapshot", {})
+    # Refresh if insight is more than 20 hours old (new day effectively)
+    generated_at = last_insight.get("generated_at", "")
+    if generated_at:
+        try:
+            gen_dt = datetime.fromisoformat(generated_at.replace("Z", "+00:00"))
+            age_hours = (datetime.now(gen_dt.tzinfo) - gen_dt).total_seconds() / 3600
+            if age_hours > 20:
+                return True, "age"
+        except Exception:
+            pass
 
-    if snap.get("period_month") != today.month or snap.get("period_year") != today.year:
-        return True, "month_change"
-
-    if abs(current.get("confirmed_balance", 0) - snap.get("confirmed_balance", 0)) > BALANCE_DRIFT_THRESHOLD:
+    if abs(current.get("confirmed_balance", 0) - current.get("prev_confirmed_balance", 0)) > BALANCE_DRIFT_THRESHOLD:
         return True, "balance_drift"
 
-    prev_on_track = sorted(snap.get("categories_on_track", []))
-    curr_on_track = sorted(current.get("categories_on_track", []))
-    if prev_on_track != curr_on_track:
-        return True, "track_change"
-
-    if abs(current.get("commitment_gap", 0) - snap.get("commitment_gap", 0)) > COMMITMENT_GAP_DRIFT_THRESHOLD:
+    if abs(current.get("commitment_gap", 0) - current.get("prev_commitment_gap", 0)) > COMMITMENT_GAP_DRIFT_THRESHOLD:
         return True, "deploy_drift"
 
     # New milestone since last insight → always refresh
@@ -123,20 +124,19 @@ def _get_milestones(limit: int = 5) -> list[dict]:
         return []
 
 
-def _get_current_insight(month: int, year: int) -> dict | None:
+def _get_latest_insight() -> dict | None:
     r = httpx.get(
-        f"{BASE_URL}/api/v1/agent_insights/current",
+        f"{BASE_URL}/api/v1/agent_insights/latest",
         headers=build_auth_headers(),
-        params={"month": month, "year": year},
         timeout=15,
     )
     r.raise_for_status()
     return r.json().get("data")
 
 
-def _post_insight(payload: dict) -> dict:
+def _post_night_analysis(payload: dict) -> dict:
     r = httpx.post(
-        f"{BASE_URL}/api/v1/agent_insights",
+        f"{BASE_URL}/api/v1/night_analyses",
         headers=build_auth_headers(),
         json=payload,
         timeout=20,
@@ -156,25 +156,22 @@ def _build_client() -> anthropic.Anthropic:
 
 def _haiku_still_valid(client: anthropic.Anthropic, last_insight: dict, summary: dict) -> bool:
     """Ask Haiku if the previous insight is still actionable given the current state."""
-    prev_recs     = json.dumps(last_insight.get("recommendations", {}), ensure_ascii=False)
+    prev_body     = last_insight.get("body", "")
     runway        = summary.get("cash_flow_runway") or {}
     health_status = runway.get("health_status", "unknown")
     commitment_gap = runway.get("commitment_gap", 0) or 0
     days_to_next  = runway.get("days_to_next_income")
-    overflow_status = (summary.get("overflow_status") or {}).get("status", "waiting")
 
-    prompt = f"""Previous insight recommendations:
-{prev_recs}
+    prompt = f"""Previous insight body:
+"{prev_body}"
 
 Current state:
 - health_status: {health_status}
 - commitment_gap: {commitment_gap:,} COP  (positive = safe, negative = critical)
 - days_to_next_income: {days_to_next}
-- overflow_status: {overflow_status}
 
 Answer ONLY with a JSON object: {{"still_valid": true}} or {{"still_valid": false}}
-The insight is NOT still valid if health_status changed (e.g., comfortable → warning/critical)
-or commitment_gap changed significantly (>500,000 COP)."""
+The insight is NOT still valid if health_status changed or commitment_gap changed significantly (>500,000 COP)."""
 
     resp = client.messages.create(
         model=HAIKU_MODEL,
@@ -195,7 +192,7 @@ def _sonnet_generate(
     trigger_reason: str,
     milestones: list[dict] | None = None,
 ) -> dict:
-    """Ask Sonnet to generate a structured financial insight."""
+    """Ask Sonnet to generate a title+body coaching insight."""
     runway    = summary.get("cash_flow_runway") or {}
     ctx       = summary.get("financial_context") or {}
     burn_rate = summary.get("burn_rate") or {}
@@ -204,7 +201,7 @@ def _sonnet_generate(
 
     prev_block = ""
     if last_insight:
-        prev_block = f"\nPrevious insight (now outdated — trigger: {trigger_reason}):\n{json.dumps(last_insight.get('recommendations', {}), ensure_ascii=False)}\n"
+        prev_block = f"\nPrevious insight (outdated — trigger: {trigger_reason}):\n\"{last_insight.get('body', '')}\"\n"
 
     milestones_block = ""
     if milestones:
@@ -227,81 +224,63 @@ def _sonnet_generate(
     realized_overflow = overflow.get("realized_overflow", 0)
     overflow_status   = overflow.get("status", "waiting")
 
-    system = """You are a responsible personal finance advisor for a Colombian user paid in two quincenas per month.
+    system = """You are a responsible personal finance coach for a Colombian user paid in two quincenas per month.
+Generate a short coaching insight card for their dashboard.
 
-CASH FLOW MODEL:
-The system uses a two-component runway model to answer "will I make it to the next payday?":
-1. daily_necessary_burn — average daily spend on necessary expenses (food, transport, etc.) over the last 30 days.
-2. commitment_gap — money left after covering all obligations due before next income AND the burn until that day.
-   Formula: confirmed_balance - committed_obligations - (daily_burn × days_to_next_income)
+HEALTH STATUS GUARDRAILS:
+- comfortable: safe to suggest moving money (commitment_gap >= 0, buffer_days >= 2)
+- warning: mention thin margin first — no deployment suggestions
+- critical: do NOT recommend moving any money
 
-HEALTH STATUS THRESHOLDS:
-- comfortable: commitment_gap >= 0 AND buffer_days >= 2 (safe to suggest moving money)
-- warning: commitment_gap >= 0 BUT buffer_days < 2 (caution — margin is thin)
-- critical: commitment_gap < 0 OR confirmed_balance = 0 (do NOT recommend deploying any money)
+KIND SELECTION:
+- "congratulation" — positive milestone or comfortable state with good behavior
+- "alert" — health_status is warning or critical
+- "achievement" — recent milestone in the milestones list
+- "proposal" — specific actionable recommendation when comfortable
+- "tip" — general coaching observation (default)
 
-STRICT GUARDRAILS:
-1. NEVER recommend moving money if health_status is "critical". The user may not make it to payday.
-2. If health_status is "warning", mention the thin margin first before any action suggestion.
-3. Any suggested deployment amount must be <= commitment_gap (when positive).
-4. realized_overflow = gross income above the base plan. It does NOT represent free money — obligations and burn consume it first.
-5. Deployment is only viable after the runway is secure.
-6. PERSONAL NOTES / GOALS: align recommendations to the user's stated goals and life priorities.
-Priority order: cash flow survival > quality of life > debt payoff > savings goals.
-When recent milestones are present, reference them in signals with type "ok".
 Respond ONLY with a valid JSON object — no prose, no markdown."""
 
     user = f"""Financial state for {datetime.now(COLOMBIA_TZ).strftime('%B %Y')}:
 
 CASH FLOW RUNWAY:
 - confirmed_balance: {confirmed_balance:,} COP
-- health_status: {health_status}  (comfortable | warning | critical)
-- commitment_gap: {commitment_gap:,} COP  ← positive = safe margin; negative = shortfall
+- health_status: {health_status}
+- commitment_gap: {commitment_gap:,} COP
 - daily_necessary_burn: {daily_burn:,} COP/day
-- days_to_next_income: {days_to_income} (next income arrives day {next_income_day})
-- buffer_days: {buffer_days}  (days of runway left after covering all commitments)
-- committed_obligations_before_next_income:
+- days_to_next_income: {days_to_income} (next income day {next_income_day})
+- buffer_days: {buffer_days}
+- committed_obligations:
 {json.dumps(committed_obls, ensure_ascii=False, indent=2)}
 
-OVERFLOW:
-- overflow_status: {overflow_status}
-- realized_overflow: {realized_overflow:,} COP
+OVERFLOW: status={overflow_status}, realized={realized_overflow:,} COP
 
 FINANCIAL CONTEXT:
 - phase: {ctx.get('phase', 'unknown')}
 - strategy: {ctx.get('strategy', 'unknown')}
-- user personal notes / goals: {ctx.get('notes', 'none')}
+- goals: {ctx.get('notes', 'none')}
 
-BURN RATE BY CATEGORY:
+BURN RATE:
 {json.dumps(burn_rate.get('categories', []), ensure_ascii=False, indent=2)}
 
-DEBTS:
-- total_balance: {debts.get('total_balance', 0):,} COP
-- monthly_payments: {debts.get('monthly_payments', 0):,} COP
+DEBTS: balance={debts.get('total_balance', 0):,} COP, monthly={debts.get('monthly_payments', 0):,} COP
 {milestones_block}{prev_block}
-Generate a JSON insight with this exact structure:
+Generate a JSON coaching card:
 {{
-  "still_valid": false,
-  "recommendations": {{
-    "primary_action": "One concrete sentence. If health_status=critical: focus on covering the gap, no deployment. If warning: name the thin margin first. If comfortable: suggest what to do with the commitment_gap surplus.",
-    "safe_to_deploy_suggested": <integer COP, must be <= max(commitment_gap, 0)>,
-    "rationale": "2-3 sentences grounded in the runway numbers."
-  }},
-  "signals": [
-    {{"type": "warn|info|ok", "category": "category_name or milestone", "message": "short observation"}}
-  ],
-  "reasoning": "Full internal reasoning. Honest, specific, no fluff."
+  "kind": "tip|congratulation|alert|proposal|achievement",
+  "title": "Short title (max 50 chars, Spanish)",
+  "body": "1-2 concrete coaching sentences grounded in the numbers (Spanish). Direct, no fluff.",
+  "reasoning": "Internal reasoning — honest, specific."
 }}"""
 
     resp = client.messages.create(
         model=SONNET_MODEL,
-        max_tokens=1024,
+        max_tokens=512,
         system=system,
         messages=[{"role": "user", "content": user}],
     )
 
     raw = resp.content[0].text.strip()
-    # Strip markdown code fences if present
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"):
@@ -318,7 +297,7 @@ def run_insight_refresh(*, trigger: str = "scheduled") -> None:
     logger.info("[insight] starting — %s/%s trigger=%s", month, year, trigger)
 
     summary      = _get_summary(month, year)
-    last_insight = _get_current_insight(month, year)
+    last_insight = _get_latest_insight()
     milestones   = _get_milestones()
     current      = _extract_current_state(summary, milestones)
 
@@ -346,18 +325,25 @@ def run_insight_refresh(*, trigger: str = "scheduled") -> None:
 
     runway         = summary.get("cash_flow_runway") or {}
     commitment_gap = runway.get("commitment_gap", 0) or 0
+    health_status  = runway.get("health_status", "unknown")
 
     payload = {
-        "period_month":           month,
-        "period_year":            year,
-        "generated_at":           now_col.isoformat(),
-        "key_metrics_snapshot":   {**current, "period_month": month, "period_year": year},
-        "recommendations":        result.get("recommendations", {}),
-        "reasoning":              result.get("reasoning", ""),
-        "signals":                result.get("signals", []),
-        "safe_to_deploy_amount":  max(commitment_gap, 0),
-        "trigger_reason":         reason,
+        "date":            now_col.date().isoformat(),
+        "metrics": {
+            "health_status":      health_status,
+            "commitment_gap":     int(commitment_gap),
+            "daily_burn":         int(runway.get("daily_necessary_burn", 0) or 0),
+            "days_to_next_income": runway.get("days_to_next_income"),
+            "category_alerts":    [],
+            "transactions_context": {"matched": [], "unmatched": []},
+        },
+        "agent_reasoning": result.get("reasoning", ""),
+        "insight": {
+            "kind":  result.get("kind", "tip"),
+            "title": result.get("title", ""),
+            "body":  result.get("body", ""),
+        },
     }
 
-    _post_insight(payload)
-    logger.info("[insight] insight persisted — trigger=%s commitment_gap=%s", reason, commitment_gap)
+    _post_night_analysis(payload)
+    logger.info("[insight] analysis persisted — trigger=%s commitment_gap=%s", reason, commitment_gap)
