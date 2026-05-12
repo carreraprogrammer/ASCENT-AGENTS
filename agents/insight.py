@@ -31,8 +31,8 @@ COLOMBIA_TZ = timezone(timedelta(hours=-5))
 HAIKU_MODEL  = "claude-haiku-4-5-20251001"
 SONNET_MODEL = "claude-sonnet-4-6"
 
-BALANCE_DRIFT_THRESHOLD = 1_000_000
-DEPLOY_DRIFT_THRESHOLD  =   500_000
+BALANCE_DRIFT_THRESHOLD    = 1_000_000
+COMMITMENT_GAP_DRIFT_THRESHOLD = 500_000
 
 
 # ── Drift checker (Python mirror of InsightDriftChecker interactor) ───────────
@@ -54,7 +54,7 @@ def _should_refresh(current: dict, last_insight: dict | None, today: datetime) -
     if prev_on_track != curr_on_track:
         return True, "track_change"
 
-    if abs(current.get("deployable_overflow", 0) - snap.get("deployable_overflow", 0)) > DEPLOY_DRIFT_THRESHOLD:
+    if abs(current.get("commitment_gap", 0) - snap.get("commitment_gap", 0)) > COMMITMENT_GAP_DRIFT_THRESHOLD:
         return True, "deploy_drift"
 
     # New milestone since last insight → always refresh
@@ -67,16 +67,16 @@ def _should_refresh(current: dict, last_insight: dict | None, today: datetime) -
 
 
 def _extract_current_state(summary: dict, milestones: list[dict]) -> dict:
-    liquidity  = summary.get("liquidity") or {}
-    balance    = summary.get("balance", {})
-    burn_rate  = summary.get("burn_rate") or {}
+    runway    = summary.get("cash_flow_runway") or {}
+    balance   = summary.get("balance", {})
+    burn_rate = summary.get("burn_rate") or {}
     categories = burn_rate.get("categories", [])
     now_col    = datetime.now(COLOMBIA_TZ)
 
     confirmed_balance = (
         balance.get("income_confirmed", 0) - balance.get("expense_confirmed", 0)
     )
-    deployable_overflow = (summary.get("overflow_status") or {}).get("deployable_overflow", 0)
+    commitment_gap = runway.get("commitment_gap", 0) or 0
     categories_on_track = [
         c["category"] for c in categories if c.get("on_track")
     ]
@@ -84,13 +84,13 @@ def _extract_current_state(summary: dict, milestones: list[dict]) -> dict:
     last_milestone = milestones[0] if milestones else None
 
     return {
-        "confirmed_balance":    confirmed_balance,
-        "deployable_overflow":  deployable_overflow,
-        "categories_on_track":  categories_on_track,
-        "period_month":         now_col.month,
-        "period_year":          now_col.year,
-        "last_milestone_code":  last_milestone["code"] if last_milestone else None,
-        "last_milestone_at":    last_milestone["achieved_at"] if last_milestone else None,
+        "confirmed_balance":   confirmed_balance,
+        "commitment_gap":      commitment_gap,
+        "categories_on_track": categories_on_track,
+        "period_month":        now_col.month,
+        "period_year":         now_col.year,
+        "last_milestone_code": last_milestone["code"] if last_milestone else None,
+        "last_milestone_at":   last_milestone["achieved_at"] if last_milestone else None,
     }
 
 
@@ -156,23 +156,25 @@ def _build_client() -> anthropic.Anthropic:
 
 def _haiku_still_valid(client: anthropic.Anthropic, last_insight: dict, summary: dict) -> bool:
     """Ask Haiku if the previous insight is still actionable given the current state."""
-    prev_recs        = json.dumps(last_insight.get("recommendations", {}), ensure_ascii=False)
-    deployable_now   = (summary.get("overflow_status") or {}).get("deployable_overflow", 0)
-    overflow_status  = (summary.get("overflow_status") or {}).get("status", "waiting")
-    ctx              = summary.get("financial_context") or {}
+    prev_recs     = json.dumps(last_insight.get("recommendations", {}), ensure_ascii=False)
+    runway        = summary.get("cash_flow_runway") or {}
+    health_status = runway.get("health_status", "unknown")
+    commitment_gap = runway.get("commitment_gap", 0) or 0
+    days_to_next  = runway.get("days_to_next_income")
+    overflow_status = (summary.get("overflow_status") or {}).get("status", "waiting")
 
     prompt = f"""Previous insight recommendations:
 {prev_recs}
 
 Current state:
+- health_status: {health_status}
+- commitment_gap: {commitment_gap:,} COP  (positive = safe, negative = critical)
+- days_to_next_income: {days_to_next}
 - overflow_status: {overflow_status}
-- deployable_overflow: {deployable_now:,} COP
-- recommended_action: {ctx.get('recommended_action', 'none')}
-- buffer_status: {(summary.get('liquidity') or {}).get('buffer_status', 'unknown')}
 
 Answer ONLY with a JSON object: {{"still_valid": true}} or {{"still_valid": false}}
-The insight is NOT still valid if deployable_overflow changed significantly or the
-recommended action contradicts current liquidity."""
+The insight is NOT still valid if health_status changed (e.g., comfortable → warning/critical)
+or commitment_gap changed significantly (>500,000 COP)."""
 
     resp = client.messages.create(
         model=HAIKU_MODEL,
@@ -194,10 +196,11 @@ def _sonnet_generate(
     milestones: list[dict] | None = None,
 ) -> dict:
     """Ask Sonnet to generate a structured financial insight."""
-    liquidity  = summary.get("liquidity") or {}
-    ctx        = summary.get("financial_context") or {}
-    burn_rate  = summary.get("burn_rate") or {}
-    debts      = summary.get("debts") or {}
+    runway    = summary.get("cash_flow_runway") or {}
+    ctx       = summary.get("financial_context") or {}
+    burn_rate = summary.get("burn_rate") or {}
+    debts     = summary.get("debts") or {}
+    overflow  = summary.get("overflow_status") or {}
 
     prev_block = ""
     if last_insight:
@@ -213,56 +216,63 @@ def _sonnet_generate(
             lines.append(f"- {m['code']} on {date_str}{meta_str}")
         milestones_block = "\nRECENT MILESTONES (most recent first):\n" + "\n".join(lines) + "\n"
 
-    overflow          = summary.get("overflow_status") or {}
-    deployable_now    = overflow.get("deployable_overflow", 0)
+    confirmed_balance = runway.get("confirmed_balance", 0) or 0
+    commitment_gap    = runway.get("commitment_gap") or 0
+    health_status     = runway.get("health_status", "unknown")
+    daily_burn        = runway.get("daily_necessary_burn", 0) or 0
+    days_to_income    = runway.get("days_to_next_income")
+    next_income_day   = runway.get("next_income_day")
+    buffer_days       = runway.get("buffer_days")
+    committed_obls    = runway.get("committed_obligations", [])
     realized_overflow = overflow.get("realized_overflow", 0)
-    deployable_cycle  = liquidity.get("deployable_this_cycle", 0)
     overflow_status   = overflow.get("status", "waiting")
-    confirmed_balance = liquidity.get("confirmed_balance", 0)
 
     system = """You are a responsible personal finance advisor for a Colombian user paid in two quincenas per month.
 
-CRITICAL INCOME TIMING CONTEXT:
-- Base income (EMAPTA) arrives in TWO tranches: ~50% around day 5, ~50% around day 20.
-- The system only tracks monthly aggregates, NOT intra-month timing.
-- This means: even if the monthly total looks sufficient, the user may be cash-flow negative between day 1-5 (before first quincena) and day 5-20 (between quincenas).
-- NEVER recommend deploying money if it would leave the user unable to pay rent or other obligations that fall due before the next quincena arrives.
-- If confirmed_balance is less than the user's largest single monthly obligation (likely rent ~$2-3M COP), DO NOT recommend any deployment — the user needs that cash to bridge the gap until the next quincena.
+CASH FLOW MODEL:
+The system uses a two-component runway model to answer "will I make it to the next payday?":
+1. daily_necessary_burn — average daily spend on necessary expenses (food, transport, etc.) over the last 30 days.
+2. commitment_gap — money left after covering all obligations due before next income AND the burn until that day.
+   Formula: confirmed_balance - committed_obligations - (daily_burn × days_to_next_income)
+
+HEALTH STATUS THRESHOLDS:
+- comfortable: commitment_gap >= 0 AND buffer_days >= 2 (safe to suggest moving money)
+- warning: commitment_gap >= 0 BUT buffer_days < 2 (caution — margin is thin)
+- critical: commitment_gap < 0 OR confirmed_balance = 0 (do NOT recommend deploying any money)
 
 STRICT GUARDRAILS:
-1. deployable_overflow = income already arrived above the base plan, capped by confirmed_balance and next-cycle coverage.
-2. realized_overflow = gross income above the base plan — this may be higher than deployable_overflow because the month's expenses already consumed part of it.
-3. CRITICAL — if deployable_overflow < realized_overflow: you MUST explain this in your rationale. The cap is the confirmed_balance (net of all month expenses). Say: "overflow of X arrived but after month expenses the net balance is Y — that's the actual ceiling for deployment."
-4. deployable_this_cycle = conditional projection only — never present as available today.
-5. safe_to_deploy is an internal guardrail — never mention it to the user.
-6. If confirmed_balance < 2_000_000 COP: primary_action must be about preserving cash for the quincena gap, NOT debt deployment.
-7. PERSONAL NOTES / GOALS: Pay close attention to "user personal notes / goals". If there's an overarching life goal or preference (e.g., lose weight, move to a new apartment), align your recommendations and rationale to support it implicitly.
-Priority order: cash flow timing > quality of life > debt payoff > savings goals.
+1. NEVER recommend moving money if health_status is "critical". The user may not make it to payday.
+2. If health_status is "warning", mention the thin margin first before any action suggestion.
+3. Any suggested deployment amount must be <= commitment_gap (when positive).
+4. realized_overflow = gross income above the base plan. It does NOT represent free money — obligations and burn consume it first.
+5. Deployment is only viable after the runway is secure.
+6. PERSONAL NOTES / GOALS: align recommendations to the user's stated goals and life priorities.
+Priority order: cash flow survival > quality of life > debt payoff > savings goals.
 When recent milestones are present, reference them in signals with type "ok".
 Respond ONLY with a valid JSON object — no prose, no markdown."""
 
     user = f"""Financial state for {datetime.now(COLOMBIA_TZ).strftime('%B %Y')}:
 
-LIQUIDITY:
-- confirmed_balance: {confirmed_balance:,} COP  ← actual net balance (income - expenses this month)
-- pending_variable: {liquidity.get('pending_variable', 0):,} COP  (NOT arrived yet)
-- projected_eom_balance: {liquidity.get('projected_eom_balance', 0):,} COP
-- next_cycle_obligations (full budget): {liquidity.get('next_cycle_obligations', 0):,} COP
-- buffer_status: {liquidity.get('buffer_status', 'unknown')}
+CASH FLOW RUNWAY:
+- confirmed_balance: {confirmed_balance:,} COP
+- health_status: {health_status}  (comfortable | warning | critical)
+- commitment_gap: {commitment_gap:,} COP  ← positive = safe margin; negative = shortfall
+- daily_necessary_burn: {daily_burn:,} COP/day
+- days_to_next_income: {days_to_income} (next income arrives day {next_income_day})
+- buffer_days: {buffer_days}  (days of runway left after covering all commitments)
+- committed_obligations_before_next_income:
+{json.dumps(committed_obls, ensure_ascii=False, indent=2)}
 
-OVERFLOW (what's actionable):
-- overflow_status: {overflow_status}  (waiting = pending income hasn't arrived; available = surplus arrived and ready)
-- realized_overflow: {realized_overflow:,} COP  ← gross income above base plan this month
-- deployable_overflow: {deployable_now:,} COP  ← MAX deployable. Capped by confirmed_balance. If less than realized_overflow, it's because expenses consumed the difference.
-- deployable_this_cycle: {deployable_cycle:,} COP  ← Projection only if pending income arrives. Do NOT present as available today.
+OVERFLOW:
+- overflow_status: {overflow_status}
+- realized_overflow: {realized_overflow:,} COP
 
 FINANCIAL CONTEXT:
 - phase: {ctx.get('phase', 'unknown')}
 - strategy: {ctx.get('strategy', 'unknown')}
-- current recommended_action: {ctx.get('recommended_action', 'none')}
 - user personal notes / goals: {ctx.get('notes', 'none')}
 
-BURN RATE:
+BURN RATE BY CATEGORY:
 {json.dumps(burn_rate.get('categories', []), ensure_ascii=False, indent=2)}
 
 DEBTS:
@@ -273,9 +283,9 @@ Generate a JSON insight with this exact structure:
 {{
   "still_valid": false,
   "recommendations": {{
-    "primary_action": "One concrete sentence. If overflow_status='waiting': say what will be possible once income arrives, no amounts. If overflow_status='available': state the deployable_overflow amount AND briefly why it differs from realized_overflow if they differ significantly.",
-    "safe_to_deploy_suggested": <integer COP, must be <= deployable_overflow>,
-    "rationale": "2-3 sentences. If deployable_overflow < realized_overflow, EXPLAIN the balance cap: overflow arrived but expenses consumed part of it — the net balance is what's available."
+    "primary_action": "One concrete sentence. If health_status=critical: focus on covering the gap, no deployment. If warning: name the thin margin first. If comfortable: suggest what to do with the commitment_gap surplus.",
+    "safe_to_deploy_suggested": <integer COP, must be <= max(commitment_gap, 0)>,
+    "rationale": "2-3 sentences grounded in the runway numbers."
   }},
   "signals": [
     {{"type": "warn|info|ok", "category": "category_name or milestone", "message": "short observation"}}
@@ -334,7 +344,8 @@ def run_insight_refresh(*, trigger: str = "scheduled") -> None:
 
     result = _sonnet_generate(client, summary, last_insight, reason, milestones)
 
-    deployable_overflow = (summary.get("overflow_status") or {}).get("deployable_overflow", 0)
+    runway         = summary.get("cash_flow_runway") or {}
+    commitment_gap = runway.get("commitment_gap", 0) or 0
 
     payload = {
         "period_month":           month,
@@ -344,9 +355,9 @@ def run_insight_refresh(*, trigger: str = "scheduled") -> None:
         "recommendations":        result.get("recommendations", {}),
         "reasoning":              result.get("reasoning", ""),
         "signals":                result.get("signals", []),
-        "safe_to_deploy_amount":  deployable_overflow,
+        "safe_to_deploy_amount":  max(commitment_gap, 0),
         "trigger_reason":         reason,
     }
 
     _post_insight(payload)
-    logger.info("[insight] insight persisted — trigger=%s deployable_overflow=%s", reason, deployable_overflow)
+    logger.info("[insight] insight persisted — trigger=%s commitment_gap=%s", reason, commitment_gap)
