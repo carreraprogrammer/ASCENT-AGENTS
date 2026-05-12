@@ -102,7 +102,6 @@ def _send_income_summary(api: RailsApiPort, messenger: MessengerPort) -> None:
 
     balance = summary.get("balance") or {}
     plan = summary.get("monthly_plan") or {}
-    liquidity = summary.get("liquidity") or {}
     actual_income = int(balance.get("income_confirmed") or 0)
     base_income = int(plan.get("base_budget_income") or 0)
     variable_income = int(plan.get("expected_variable_income") or 0)
@@ -136,7 +135,6 @@ def _send_income_summary(api: RailsApiPort, messenger: MessengerPort) -> None:
         f"• Confirmado: <b>{_fmt_cop(actual_income)}</b>",
         f"• Plan esperado: {_fmt_cop(projected_income)} ({_fmt_cop(base_income)} base + {_fmt_cop(variable_income)} variable)",
         _variation_line(actual_income, projected_income),
-        f"• Pendiente proyectado este mes: {_fmt_cop(liquidity.get('pending_income'))}",
         "",
         "<b>Fuentes proyectadas</b>",
         *source_lines,

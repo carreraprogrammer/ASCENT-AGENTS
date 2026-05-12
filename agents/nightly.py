@@ -400,7 +400,7 @@ TOOLS = [
     {
         "name": "get_summary",
         "description": (
-            "Resumen completo del mes: balance, burn_rate por categoría, monthly_plan, overflow_status, liquidity, deudas y contexto financiero. "
+            "Resumen completo del mes: balance, burn_rate por categoría, monthly_plan, overflow_status, cash_flow_runway, deudas y contexto financiero. "
             "Llámalo después de get_completeness para ver alertas de presupuesto y estado del plan del mes. "
             "Si burn_rate.categories tiene alertas, inclúyelas en el mensaje de Telegram."
         ),
@@ -726,25 +726,24 @@ Si es día 1-5 o 15-20 del mes, menciona al final del resumen:
 - Si hay budgets configurados: "✅ Plan del mes aprobado"
 - Si NO hay budgets: "📋 Falta aprobar el plan del mes — el wizard te lo envía esta mañana"
 
-═══ NUEVO: OVERFLOW DEL MES ═══
-Si get_summary devuelve overflow_status:
-- overflow_status.realized_overflow = ingreso extra que llegó por encima del plan base. NO es dinero libre.
-- overflow_status.deployable_overflow = lo que podés mover HOY. Se calcula como el mínimo entre el overflow realizado, la cobertura del próximo ciclo (safe_to_deploy interno), y el balance_confirmed del mes. NUNCA puede ser mayor que el balance real.
-- CRÍTICO — cuando deployable_overflow < realized_overflow:
-  Es porque el balance_confirmed actúa como tope. Significa que el overflow llegó, pero gran parte ya se gastó durante el mes. NO digas "de eso, $X está disponible" sin explicar el por qué.
-  → Decí exactamente: "Entraron $X en overflow sobre el plan. Pero el saldo neto del mes (ingresos − gastos confirmados) es $Y. Eso es lo máximo que podés mover — el resto del overflow ya se fue en gastos del mes."
-- liquidity.deployable_this_cycle = proyección condicional solo si el ingreso pendiente llega. NO lo presentes como dinero disponible hoy.
-- liquidity.safe_to_deploy es una señal interna de supervivencia — NUNCA lo menciones al usuario ni lo uses como monto a desplegar.
-- Si overflow_status.status == "available" y deployable_overflow > 0:
-  - mencioná cuánto overflow llegó sobre el plan base
-  - explicá cuánto está disponible para mover (deployable_overflow) Y el motivo si es menor al overflow bruto
-  - indicá a dónde debería ir según overflow_rule
-- Si overflow_status.status == "blocked_by_liquidity":
-  - NO recomiendes abonar a deuda, inversión ni colchón
-  - explicá que hubo ingreso extra, pero está reservado por obligaciones próximas / buffer
-- Si status == "waiting": el ingreso variable todavía no llegó — omití la sección o indicá que cuando llegue habrá margen
-- El ingreso extra NO debe presentarse como permiso para inflar el presupuesto base
-- Ninguna recomendación de snowball puede superar overflow_status.deployable_overflow
+═══ SALUD DEL FLUJO DE CAJA ═══
+Si get_summary devuelve cash_flow_runway, usalo como señal principal de liquidez operativa:
+- cash_flow_runway.health_status: "comfortable" | "warning" | "critical"
+  - comfortable: hay margen suficiente hasta el próximo ingreso — podés sugerir mover dinero
+  - warning: el margen es menor a 2 días de gasto — mencioná la estrechez antes de cualquier sugerencia
+  - critical: el saldo no alcanza para llegar al próximo ingreso — NO recomiendes mover nada
+- cash_flow_runway.commitment_gap: lo que sobra (o falta si es negativo) después de cubrir obligaciones y burn hasta el próximo ingreso
+- cash_flow_runway.days_to_next_income: días hasta el próximo ingreso
+- cash_flow_runway.committed_obligations: lista de obligaciones que vencen antes del próximo ingreso
+- cash_flow_runway.daily_necessary_burn: gasto diario promedio en categoría "necessary"
+
+REGLAS ESTRICTAS DE FLUJO:
+- Si health_status == "critical": NO recomiendes abonar a deuda, inversión ni colchón. El usuario puede no llegar al próximo ingreso.
+- Si health_status == "warning": nombrá el margen estrecho primero. Cualquier sugerencia va condicionada.
+- Si health_status == "comfortable": podés sugerir mover hasta commitment_gap (si es positivo).
+- Ninguna recomendación puede superar commitment_gap cuando es positivo.
+- overflow_status.realized_overflow = ingreso extra sobre el plan base — no es dinero libre si el runway está ajustado.
+- El ingreso extra NO debe presentarse como permiso para inflar el presupuesto base.
 
 ═══ CONTEXTO FINANCIERO ═══
 Si get_summary o get_financial_context devuelve phase=null o data=null:
