@@ -610,7 +610,9 @@ TOOLS = [
             "Persiste el análisis nocturno completo + el insight del dashboard. "
             "Llamar SIEMPRE al FINAL del ciclo, después de send_telegram. "
             "insight.title y body: 1-2 oraciones de coaching directo. "
-            "kind = congratulation si comfortable, alert si critical/warning, tip para el resto."
+            "kind = congratulation si comfortable, alert si critical/warning, tip para el resto. "
+            "Si hay transacciones que no pudiste resolver (clasificar, deduplicar, o confirmar como deuda), "
+            "inclúyelas en metrics.transactions_context.needs_review para que el usuario las revise en la app."
         ),
         "input_schema": {
             "type": "object",
@@ -624,7 +626,31 @@ TOOLS = [
                         "daily_burn":         {"type": "integer"},
                         "days_to_next_income": {"type": "integer"},
                         "category_alerts":   {"type": "array"},
-                        "transactions_context": {"type": "object"},
+                        "transactions_context": {
+                            "type": "object",
+                            "description": "Contexto de transacciones del día. needs_review = transacciones que el agente no pudo resolver.",
+                            "properties": {
+                                "matched":   {"type": "array"},
+                                "unmatched": {"type": "array"},
+                                "needs_review": {
+                                    "type": "array",
+                                    "description": "Transacciones que requieren revisión manual del usuario.",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "transaction_id": {"type": "integer", "description": "ID de la transacción en cuestión"},
+                                            "concept":  {"type": "string"},
+                                            "amount":   {"type": "integer"},
+                                            "date":     {"type": "string"},
+                                            "reason":   {"type": "string", "enum": ["no_classification", "deduplication_risk", "possible_debt"]},
+                                            "notes":    {"type": "string", "description": "Una línea explicando qué no pudiste resolver"},
+                                            "suggested_subcategory_code": {"type": "string", "description": "Tu hipótesis de subcategoría si aplica"},
+                                        },
+                                        "required": ["transaction_id", "concept", "amount", "date", "reason"],
+                                    },
+                                },
+                            },
+                        },
                     },
                     "required": ["health_status", "commitment_gap", "daily_burn"],
                 },
@@ -889,6 +915,22 @@ get_night_metrics devuelve transactions_context.matched: gastos del día que YA 
 - Solo mencionar si el delta es > 5% del monto esperado (ej: pagaron $2.6M en lugar de $2.5M → mencionarlo).
 - transactions_context.unmatched = gastos sin obligación → estos sí necesitan lectura conductual.
 
+═══ LISTA PARA REVISIÓN DEL USUARIO ═══
+Cuando no puedas resolver alguna de estas situaciones de forma confiable, añadí la transacción a transactions_context.needs_review en create_night_analysis para que el usuario la resuelva desde la app:
+
+1. no_classification: no hay suficiente contexto para asignar subcategoría y la transacción quedó con subcategory_code=null
+2. deduplication_risk: el mismo monto aparece en fuentes distintas (Gmail + Telegram) pero el producto/concepto no coincide exactamente — no estás seguro si es el mismo gasto o dos distintos
+3. possible_debt: el concepto sugiere pago a entidad crediticia (ej. "Abono préstamo", "Cuota libre inversión") pero no está registrado como Debt ni recurring_obligation — no estás seguro si registrarlo como gasto nuevo o si ya está capturado en otra forma
+
+Campos requeridos por ítem:
+- transaction_id: ID de la transacción dudosa (la que ya registraste o la que dejaste pendiente)
+- concept, amount, date: datos de la transacción
+- reason: "no_classification" | "deduplication_risk" | "possible_debt"
+- notes: una línea explicando qué no pudiste resolver (ej: "Monto $120k en Gmail no coincide con transacción Nequi del mismo día — producto distinto")
+- suggested_subcategory_code: tu hipótesis si aplica (ej: "creditos" para un posible pago de deuda)
+
+REGLA ESTRICTA: Solo añadir lo que genuinamente no pudiste resolver con el contexto disponible. Si tenés suficiente información → clasificá directamente sin añadir a needs_review.
+
 ═══ FLUJO RECOMENDADO ═══
 1. get_night_metrics → pre-contextualizar: saber qué transacciones son ESPERADAS antes de procesar Gmail
 2. get_completeness → detectar gaps de contexto
@@ -908,6 +950,7 @@ get_night_metrics devuelve transactions_context.matched: gastos del día que YA 
 16. create_night_analysis → SIEMPRE al final. Persistir análisis + insight del dashboard.
     insight.kind = congratulation si comfortable y balance positivo | alert si critical o warning con gap negativo | achievement si hay milestone reciente | tip para el resto.
     insight.title y body: 1-2 oraciones de coaching directo en español, basadas en datos reales.
+    Si hay transacciones sin resolver → incluirlas en metrics.transactions_context.needs_review.
 
 ═══ RESUMEN FINAL ═══
 💰 <b>Revisión nocturna — {now_col.strftime("%d/%m/%Y")}</b>
