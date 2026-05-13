@@ -152,3 +152,40 @@ class OpenAICompatibleLlmProvider(LlmProviderPort):
 
         logger.error("[%s_llm] reached max_iterations (%d) without final text", self._provider_name, max_iterations)
         return ""
+
+    def simple_complete(
+        self,
+        messages: list[dict],
+        *,
+        system: str | None = None,
+        max_tokens: int = 512,
+        model: str | None = None,
+    ) -> str:
+        full_messages: list[dict] = []
+        if system:
+            full_messages.append({"role": "system", "content": system})
+        full_messages.extend(messages)
+
+        payload: dict = {
+            "model": model or self._default_model,
+            "messages": full_messages,
+            "max_tokens": max_tokens,
+        }
+        if self._provider_name != "kimi":
+            payload["temperature"] = 0.2
+        else:
+            payload["thinking"] = {"type": "disabled"}
+
+        response = self._client.post("/chat/completions", json=payload)
+        try:
+            response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            body = exc.response.text[:2000]
+            raise RuntimeError(
+                f"{self._provider_name} completion failed with {exc.response.status_code}: {body}"
+            ) from exc
+
+        data = response.json()
+        choice = (data.get("choices") or [{}])[0]
+        message = choice.get("message") or {}
+        return _normalize_text_content(message.get("content") or "")

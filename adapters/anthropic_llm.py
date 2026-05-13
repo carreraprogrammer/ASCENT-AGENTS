@@ -91,3 +91,25 @@ class AnthropicLlmProvider(LlmProviderPort):
 
         logger.error("[anthropic_llm] reached max_iterations (%d) without end_turn", max_iterations)
         return ""
+
+    def simple_complete(
+        self,
+        messages: list[dict],
+        *,
+        system: str | None = None,
+        max_tokens: int = 512,
+        model: str | None = None,
+    ) -> str:
+        kwargs: dict = {
+            "model": model or self._default_model,
+            "max_tokens": max_tokens,
+            "messages": messages,
+        }
+        if system:
+            kwargs["system"] = system
+
+        response = self._client.messages.create(**kwargs)
+        for block in response.content:
+            if hasattr(block, "text"):
+                return block.text
+        return ""

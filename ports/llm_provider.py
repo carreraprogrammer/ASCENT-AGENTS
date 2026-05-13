@@ -18,3 +18,14 @@ class LlmProviderPort(ABC):
         prior_messages: list[dict] | None = None,
     ) -> str:
         raise NotImplementedError
+
+    @abstractmethod
+    def simple_complete(
+        self,
+        messages: list[dict],
+        *,
+        system: str | None = None,
+        max_tokens: int = 512,
+        model: str | None = None,
+    ) -> str:
+        raise NotImplementedError

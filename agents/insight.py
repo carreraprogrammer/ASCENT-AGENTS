@@ -16,22 +16,18 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from datetime import datetime, timezone, timedelta
 
-import anthropic
 import httpx
 
 from adapters.rails_http import BASE_URL, build_auth_headers
+from services.llm_factory import build_llm_provider
 
 logger = logging.getLogger(__name__)
 
 COLOMBIA_TZ = timezone(timedelta(hours=-5))
 
-HAIKU_MODEL  = "claude-haiku-4-5-20251001"
-SONNET_MODEL = "claude-sonnet-4-6"
-
-BALANCE_DRIFT_THRESHOLD    = 1_000_000
+BALANCE_DRIFT_THRESHOLD        = 1_000_000
 COMMITMENT_GAP_DRIFT_THRESHOLD = 500_000
 
 
@@ -147,20 +143,13 @@ def _post_night_analysis(payload: dict) -> dict:
 
 # ── LLM calls ─────────────────────────────────────────────────────────────────
 
-def _build_client() -> anthropic.Anthropic:
-    key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not key:
-        raise ValueError("ANTHROPIC_API_KEY not set — cannot generate insights.")
-    return anthropic.Anthropic(api_key=key)
-
-
-def _haiku_still_valid(client: anthropic.Anthropic, last_insight: dict, summary: dict) -> bool:
-    """Ask Haiku if the previous insight is still actionable given the current state."""
-    prev_body     = last_insight.get("body", "")
-    runway        = summary.get("cash_flow_runway") or {}
-    health_status = runway.get("health_status", "unknown")
+def _haiku_still_valid(last_insight: dict, summary: dict) -> bool:
+    """Ask the fast model if the previous insight is still actionable given the current state."""
+    prev_body      = last_insight.get("body", "")
+    runway         = summary.get("cash_flow_runway") or {}
+    health_status  = runway.get("health_status", "unknown")
     commitment_gap = runway.get("commitment_gap", 0) or 0
-    days_to_next  = runway.get("days_to_next_income")
+    days_to_next   = runway.get("days_to_next_income")
 
     prompt = f"""Previous insight body:
 "{prev_body}"
@@ -173,20 +162,19 @@ Current state:
 Answer ONLY with a JSON object: {{"still_valid": true}} or {{"still_valid": false}}
 The insight is NOT still valid if health_status changed or commitment_gap changed significantly (>500,000 COP)."""
 
-    resp = client.messages.create(
-        model=HAIKU_MODEL,
+    llm = build_llm_provider()
+    raw = llm.simple_complete(
+        [{"role": "user", "content": prompt}],
         max_tokens=64,
-        messages=[{"role": "user", "content": prompt}],
     )
     try:
-        data = json.loads(resp.content[0].text)
+        data = json.loads(raw)
         return bool(data.get("still_valid", False))
     except Exception:
         return False
 
 
 def _sonnet_generate(
-    client: anthropic.Anthropic,
     summary: dict,
     last_insight: dict | None,
     trigger_reason: str,
@@ -273,14 +261,12 @@ Generate a JSON coaching card:
   "reasoning": "Internal reasoning — honest, specific."
 }}"""
 
-    resp = client.messages.create(
-        model=SONNET_MODEL,
-        max_tokens=512,
+    llm = build_llm_provider()
+    raw = llm.simple_complete(
+        [{"role": "user", "content": user}],
         system=system,
-        messages=[{"role": "user", "content": user}],
-    )
-
-    raw = resp.content[0].text.strip()
+        max_tokens=512,
+    ).strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1]
         if raw.startswith("json"):
@@ -312,16 +298,14 @@ def run_insight_refresh(*, trigger: str = "scheduled") -> None:
 
     logger.info("[insight] refresh needed — reason=%s", reason)
 
-    client = _build_client()
-
-    # Haiku validity gate (only if previous insight exists)
+    # Fast validity gate (only if previous insight exists)
     if last_insight and trigger == "scheduled":
-        still_valid = _haiku_still_valid(client, last_insight, summary)
+        still_valid = _haiku_still_valid(last_insight, summary)
         if still_valid:
-            logger.info("[insight] Haiku confirmed previous insight still valid — skipping.")
+            logger.info("[insight] fast model confirmed previous insight still valid — skipping.")
             return
 
-    result = _sonnet_generate(client, summary, last_insight, reason, milestones)
+    result = _sonnet_generate(summary, last_insight, reason, milestones)
 
     runway         = summary.get("cash_flow_runway") or {}
     commitment_gap = runway.get("commitment_gap", 0) or 0
