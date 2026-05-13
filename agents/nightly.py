@@ -779,7 +779,7 @@ committed (Comprometido):
 necessary (Necesario):
   mercado, gasolina, transporte, salud, celular
 
-discretionary (Discrecional):
+discretionary (Flexible):
   restaurantes, delivery, ocio, ropa, tecnologia, suscripciones
 
 investment (Inversión):
@@ -826,7 +826,7 @@ Los mensajes de Telegram se procesan en tiempo real por el chat agent (desde 15-
 ═══ NUEVO: ALERTAS DE PRESUPUESTO ═══
 Si get_summary devuelve burn_rate.categories con alertas:
 - Inclúyelas en el resumen bajo la sección "⚠️ Alertas de presupuesto"
-- Sé específico: "Discrecional va en $762k proyectado vs $500k presupuestado"
+- Sé específico: "Flexible va en $762k proyectado vs $500k presupuestado"
 - Si no hay presupuestos configurados, omite esta sección sin mencionarla
 
 ═══ NUEVO: ESTADO DEL PLAN QUINCENAL ═══
