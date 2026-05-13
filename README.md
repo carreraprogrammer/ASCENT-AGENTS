@@ -190,7 +190,7 @@ Step 1 → confirma ingresos esperados del período
 Step 2 → muestra gastos comprometidos (arriendo, créditos, obligaciones fijas)
 Step 3 → recomienda abono extra a deuda (estrategia snowball/avalanche)
 Step 4 → propone presupuesto para gastos necesarios
-Step 5 → propone presupuesto para gastos discrecionales
+Step 5 → propone presupuesto para gastos flexibles
 Step 6 → define % de recompensa si cumple el plan
 Step 7 → muestra plan de flujo de caja completo para aprobación
 Step 8 → guarda presupuestos vía Rails API
