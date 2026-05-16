@@ -91,7 +91,17 @@ def handle_web_chat(
             max_iterations=12,
             model=resolve_llm_model(),
         )
-        logger.info("[web_chat] session %s completed", session_id)
+        logger.info("[web_chat] session %s completed mutated=%s", session_id, state["mutated"])
+
+        if state["mutated"]:
+            try:
+                tool_map["emit_ui_event"]({
+                    "event_type": "data_changed",
+                    "payload": {},
+                    "session_id": session_id,
+                })
+            except Exception as emit_exc:
+                logger.warning("[web_chat] data_changed emit failed: %s", emit_exc)
     except Exception as exc:
         logger.error("[web_chat] session %s failed: %s", session_id, exc, exc_info=True)
         try:
