@@ -139,6 +139,26 @@ def build_tools() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "withdraw_sinking_fund",
+            "description": (
+                "Retira dinero de un bolsillo (sinking fund) y lo devuelve al flujo de caja disponible. "
+                "Crea automáticamente una transacción de ingreso confirmada por el monto retirado. "
+                "Si no se especifica amount, retira el saldo completo del bolsillo. "
+                "Usá este tool cuando el usuario quiera 'retirar', 'usar', 'liberar' o 'vaciar' un bolsillo."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "description": "ID del sinking fund."},
+                    "amount": {
+                        "type": "integer",
+                        "description": "Monto a retirar en COP. Si se omite, retira el saldo completo.",
+                    },
+                },
+                "required": ["id"],
+            },
+        },
+        {
             "name": "create_transactions",
             "description": (
                 "Crea múltiples transacciones en una sola llamada. "
@@ -933,6 +953,7 @@ def build_tool_map(
         "get_sinking_funds": lambda _: api.get_sinking_funds(),
         "create_sinking_fund": lambda p: _post("/api/v1/sinking_funds", p),
         "update_sinking_fund": lambda p: _patch(f"/api/v1/sinking_funds/{p.pop('id')}", p),
+        "withdraw_sinking_fund": lambda p: api.withdraw_sinking_fund(p["id"], p.get("amount")),
         "create_transactions": _create_transactions,
         "create_transaction": _create_transaction,
         "record_debt_payment": _record_debt_payment,

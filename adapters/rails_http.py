@@ -278,6 +278,13 @@ class RailsHttpAdapter(RailsApiPort):
         result = self._post("/api/v1/milestones", {"code": code, "metadata": metadata or {}})
         return result.get("data", result) if isinstance(result, dict) else result
 
+    def withdraw_sinking_fund(self, sinking_fund_id: int | str, amount: int | None = None) -> dict:
+        body = {}
+        if amount is not None:
+            body["amount"] = amount
+        result = self._post(f"/api/v1/sinking_funds/{sinking_fund_id}/withdraw", body)
+        return result.get("data", result) if isinstance(result, dict) else result
+
     # --- agent ui events ---
 
     def create_agent_ui_event(self, event_type: str, payload: dict, session_id: str | None = None) -> dict:
