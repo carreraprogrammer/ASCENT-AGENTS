@@ -184,3 +184,8 @@ class RailsApiPort(ABC):
     def create_milestone(self, code: str, metadata: dict) -> dict:
         """POST /api/v1/milestones"""
         ...
+
+    @abstractmethod
+    def withdraw_sinking_fund(self, sinking_fund_id: int | str, amount: int | None = None) -> dict:
+        """POST /api/v1/sinking_funds/:id/withdraw — returns {sinking_fund, transaction}"""
+        ...

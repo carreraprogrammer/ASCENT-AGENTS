@@ -32,8 +32,14 @@ def handle(api: RailsApiPort, messenger: MessengerPort, data: str) -> None:
     """
     parts = data.split(":")
 
+    def is_numeric_id(val: str) -> bool:
+        return val.isdigit()
+
     if parts[0] == "cat" and len(parts) == 3:
         txn_id, subcat_code = parts[1], parts[2]
+        if not is_numeric_id(txn_id):
+            logger.warning("[callback_handler] callback ignorado: txn_id no numérico: %s", data)
+            return
         try:
             result = api.update_transaction(txn_id, subcategory_code=subcat_code, status="confirmed")
             attrs = result.get("data", {}).get("attributes", result)
@@ -45,6 +51,9 @@ def handle(api: RailsApiPort, messenger: MessengerPort, data: str) -> None:
 
     elif parts[0] == "confirm" and len(parts) == 2:
         txn_id = parts[1]
+        if not is_numeric_id(txn_id):
+            logger.warning("[callback_handler] callback ignorado: txn_id no numérico: %s", data)
+            return
         try:
             result = api.update_transaction(txn_id, status="confirmed")
             attrs = result.get("data", {}).get("attributes", result)
@@ -56,6 +65,9 @@ def handle(api: RailsApiPort, messenger: MessengerPort, data: str) -> None:
 
     elif parts[0] == "pay" and len(parts) == 3:
         txn_id, payment_source = parts[1], parts[2]
+        if not is_numeric_id(txn_id):
+            logger.warning("[callback_handler] callback ignorado: txn_id no numérico: %s", data)
+            return
         try:
             kwargs: dict = {"payment_source": payment_source}
             result = api.update_transaction(txn_id, **kwargs)
@@ -69,6 +81,9 @@ def handle(api: RailsApiPort, messenger: MessengerPort, data: str) -> None:
 
     elif parts[0] == "skip" and len(parts) == 2:
         txn_id = parts[1]
+        if not is_numeric_id(txn_id):
+            logger.warning("[callback_handler] callback ignorado: txn_id no numérico: %s", data)
+            return
         try:
             from datetime import datetime, timezone
             api.update_transaction(txn_id, clarification_resolved_at=datetime.now(timezone.utc).isoformat())
