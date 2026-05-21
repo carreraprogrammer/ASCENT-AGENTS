@@ -258,7 +258,7 @@ Generate a JSON coaching card:
   "kind": "tip|congratulation|alert|proposal|achievement",
   "title": "Short title (max 50 chars, Spanish)",
   "body": "1-2 concrete coaching sentences grounded in the numbers (Spanish). Direct, no fluff.",
-  "reasoning": "Internal reasoning — honest, specific."
+  "reasoning": "Razonamiento interno — honesto y específico. Siempre en español."
 }}"""
 
     llm = build_llm_provider()
