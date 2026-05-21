@@ -212,52 +212,83 @@ def _sonnet_generate(
     realized_overflow = overflow.get("realized_overflow", 0)
     overflow_status   = overflow.get("status", "waiting")
 
-    system = """You are a responsible personal finance coach for a Colombian user paid in two quincenas per month.
-Generate a short coaching insight card for their dashboard.
+    system = """Eres el coach financiero personal de un usuario colombiano que cobra por quincenas.
+Tu trabajo es generar una tarjeta de insight para su dashboard.
 
-HEALTH STATUS GUARDRAILS:
-- comfortable: safe to suggest moving money (commitment_gap >= 0, buffer_days >= 2)
-- warning: mention thin margin first — no deployment suggestions
-- critical: do NOT recommend moving any money
+REGLAS DE COMUNICACIÓN — MUY IMPORTANTE:
+- Escribí siempre en español, tuteo (vos/te).
+- NUNCA repitas nombres de campos técnicos: nada de "commitment_gap", "buffer_days", "daily_burn", "colchón de días".
+- NUNCA pongas números crudos como "368346". Formateá así: $368K, $1.2M, $45K.
+- Si mencionás dinero, siempre con el símbolo y abreviado. Si mencionás días, decí "hasta el 20" o "hasta fin de quincena", no "22 días".
+- El mensaje tiene que sonar como lo que le diría un amigo que sabe de finanzas, no como un reporte de sistema.
+- 1-2 oraciones máximo. Directo, sin relleno motivacional.
 
-KIND SELECTION:
-- "congratulation" — positive milestone or comfortable state with good behavior
-- "alert" — health_status is warning or critical
-- "achievement" — recent milestone in the milestones list
-- "proposal" — specific actionable recommendation when comfortable
-- "tip" — general coaching observation (default)
+SELECCIÓN DE KIND:
+- "congratulation" — estado cómodo con buen comportamiento o hito positivo
+- "alert" — margen ajustado o crítico
+- "achievement" — logro reciente en la lista de hitos
+- "proposal" — recomendación accionable concreta cuando hay excedente
+- "tip" — observación de coaching general (por defecto)
 
-Respond ONLY with a valid JSON object — no prose, no markdown."""
+GUARDARRAÍLES POR ESTADO:
+- comfortable: podés sugerir mover plata si hay excedente real
+- warning: mencioná el margen ajustado primero, sin sugerir deploys
+- critical: NO recomiendes mover ninguna plata
 
-    user = f"""Financial state for {datetime.now(COLOMBIA_TZ).strftime('%B %Y')}:
+Respondé SOLO con un JSON válido, sin prose ni markdown."""
 
-CASH FLOW RUNWAY:
-- confirmed_balance: {confirmed_balance:,} COP
-- health_status: {health_status}
-- commitment_gap: {commitment_gap:,} COP
-- daily_necessary_burn: {daily_burn:,} COP/day
-- days_to_next_income: {days_to_income} (next income day {next_income_day})
-- buffer_days: {buffer_days}
-- committed_obligations:
-{json.dumps(committed_obls, ensure_ascii=False, indent=2)}
+    # Formatear datos financieros en lenguaje legible antes de pasarlos al modelo
+    def _fmt(n: int | float) -> str:
+        n = int(n)
+        if abs(n) >= 1_000_000:
+            return f"${n/1_000_000:.1f}M"
+        if abs(n) >= 1_000:
+            return f"${n//1_000}K"
+        return f"${n}"
 
-OVERFLOW: status={overflow_status}, realized={realized_overflow:,} COP
+    burn_summary = []
+    for cat in burn_rate.get("categories", []):
+        burn_summary.append({
+            "categoria": cat.get("category", cat.get("category_type", "")),
+            "presupuesto": _fmt(cat.get("budget", 0)),
+            "gastado": _fmt(cat.get("spent", 0)),
+            "porcentaje_usado": f"{cat.get('pct', 0):.0f}%",
+            "alerta": cat.get("alert") or ("sobre presupuesto" if cat.get("pct", 0) > 100 else "ok"),
+        })
 
-FINANCIAL CONTEXT:
-- phase: {ctx.get('phase', 'unknown')}
-- strategy: {ctx.get('strategy', 'unknown')}
-- goals: {ctx.get('notes', 'none')}
+    obligations_summary = [
+        {"nombre": o.get("name", ""), "monto": _fmt(o.get("remaining", o.get("expected", 0)))}
+        for o in committed_obls
+    ]
 
-BURN RATE:
-{json.dumps(burn_rate.get('categories', []), ensure_ascii=False, indent=2)}
+    user = f"""Estado financiero — {datetime.now(COLOMBIA_TZ).strftime('%B %Y')}:
 
-DEBTS: balance={debts.get('total_balance', 0):,} COP, monthly={debts.get('monthly_payments', 0):,} COP
+SALUD DEL FLUJO:
+- estado: {health_status} (comfortable=tranquilo, warning=justo, critical=en rojo)
+- margen hasta próximo ingreso: {_fmt(commitment_gap)}
+- gasto diario necesario: {_fmt(daily_burn)}/día
+- días hasta próximo ingreso: {days_to_income} (día {next_income_day} del mes)
+- días de colchón real: {buffer_days}
+- obligaciones pendientes antes del próximo ingreso:
+{json.dumps(obligations_summary, ensure_ascii=False, indent=2)}
+
+EXCEDENTE: estado={overflow_status}, monto real={_fmt(realized_overflow)}
+
+CONTEXTO FINANCIERO:
+- fase: {ctx.get('phase', 'desconocida')}
+- estrategia: {ctx.get('strategy', 'desconocida')}
+- notas/objetivos: {ctx.get('notes', 'ninguno')}
+
+GASTO POR CATEGORÍA:
+{json.dumps(burn_summary, ensure_ascii=False, indent=2)}
+
+DEUDAS: saldo total={_fmt(debts.get('total_balance', 0))}, pago mensual={_fmt(debts.get('monthly_payments', 0))}
 {milestones_block}{prev_block}
-Generate a JSON coaching card:
+Generá la tarjeta de coaching:
 {{
   "kind": "tip|congratulation|alert|proposal|achievement",
-  "title": "Short title (max 50 chars, Spanish)",
-  "body": "1-2 concrete coaching sentences grounded in the numbers (Spanish). Direct, no fluff.",
+  "title": "Título corto (máx 50 chars, español, concreto)",
+  "body": "1-2 oraciones de coaching en español. Formateá montos como $XXK o $X.XM. Soná como un amigo que sabe de finanzas, no como un sistema.",
   "reasoning": "Razonamiento interno — honesto y específico. Siempre en español."
 }}"""
 
