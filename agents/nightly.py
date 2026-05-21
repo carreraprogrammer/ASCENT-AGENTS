@@ -654,7 +654,7 @@ TOOLS = [
                     },
                     "required": ["health_status", "commitment_gap", "daily_burn"],
                 },
-                "agent_reasoning": {"type": "string"},
+                "agent_reasoning": {"type": "string", "description": "Razonamiento interno del agente — qué observaste y por qué tomaste estas decisiones. Siempre en español."},
                 "insight": {
                     "type": "object",
                     "properties": {
