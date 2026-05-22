@@ -928,20 +928,21 @@ TIPOS DE CONFLICTO:
 
 3. possible_debt: el concepto sugiere pago a entidad crediticia (ej. "Abono préstamo", "Cuota libre inversión") pero no está registrado como Debt ni recurring_obligation. El usuario abre el editor para vincularlo.
 
-CARRY-OVER — REGLA CRÍTICA:
-Los conflictos no se resuelven solos entre día y día. En el paso 10 (get_pending_transactions) revisás las transacciones pending de días ANTERIORES. Por cada una que siga pending (el usuario no la resolvió desde la app):
-- Añadila a needs_review de HOY con reason="unconfirmed"
-- En notes: indicá la fecha original (ej: "Pendiente desde 20/05 — el usuario aún no confirmó este movimiento")
-Así el usuario ve todos los conflictos acumulados en el análisis de hoy, no solo los del día.
+CÓMO MARCAR CONFLICTOS — REGLA ARQUITECTURAL:
+Los conflictos NO van en create_night_analysis. Van directamente en la transacción mediante update_transaction con metadata. La app los enlista en tiempo real consultando las transacciones.
 
-Campos requeridos por ítem:
-- transaction_id: ID de la transacción
-- concept, amount, date: datos de la transacción
-- reason: "unconfirmed" | "no_classification" | "deduplication_risk" | "possible_debt"
-- notes: una línea explicando qué no pudiste resolver o por qué quedó pendiente
-- suggested_subcategory_code: tu hipótesis si aplica
+- unconfirmed: simplemente dejá la transacción con status="pending". La app la detecta automáticamente.
+  No hace falta metadata adicional salvo que quieras dejar una nota: metadata={ "conflict_notes": "..." }
 
-REGLA ESTRICTA: Solo añadir lo que genuinamente no pudiste resolver. Si tenés suficiente información → resolvé directamente sin añadir a needs_review.
+- no_classification, deduplication_risk, possible_debt: usá update_transaction con:
+  metadata={ "conflict_reason": "deduplication_risk", "conflict_notes": "Monto $120k en Gmail no coincide con Nequi del mismo día — producto distinto", "suggested_subcategory_code": "creditos" }
+  La transacción puede quedar confirmed o pending según el caso.
+
+El campo needs_review en create_night_analysis ya no se usa — no lo incluyas.
+
+CARRY-OVER: Las transacciones pending de días anteriores siguen apareciendo en la app automáticamente (la app consulta todas las pending de la cuenta). No necesitás re-listarlas vos.
+
+REGLA ESTRICTA: Solo marcá conflictos genuinos. Si tenés suficiente información → resolvé directamente.
 
 ═══ FLUJO RECOMENDADO ═══
 1. get_night_metrics → pre-contextualizar: saber qué transacciones son ESPERADAS antes de procesar Gmail
