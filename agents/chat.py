@@ -283,7 +283,7 @@ def handle_app_message(
         "Interpretalo y actuá en tiempo real usando las herramientas disponibles. "
         "Si es un gasto o ingreso claro, registralo. "
         "Si es una corrección o borrado, usá transacciones recientes para resolverlo. "
-        "Si hay ambigüedad real, pedí una aclaración breve.\n\n"
+        "Si hay ambigüedad real, pedí una aclaración con show_quick_replies — nunca con texto que termina en '¿quieres X?'.\n\n"
         f"Mensaje: {text}"
     )
 
