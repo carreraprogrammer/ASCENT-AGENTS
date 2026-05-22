@@ -189,3 +189,8 @@ class RailsApiPort(ABC):
     def withdraw_sinking_fund(self, sinking_fund_id: int | str, amount: int | None = None) -> dict:
         """POST /api/v1/sinking_funds/:id/withdraw — returns {sinking_fund, transaction}"""
         ...
+
+    @abstractmethod
+    def create_chat_message(self, role: str, content: str, channel: str = "app") -> dict:
+        """POST /api/v1/chat_messages — persists an assistant response to the DB."""
+        ...
