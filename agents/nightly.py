@@ -642,7 +642,7 @@ TOOLS = [
                                             "concept":  {"type": "string"},
                                             "amount":   {"type": "integer"},
                                             "date":     {"type": "string"},
-                                            "reason":   {"type": "string", "enum": ["no_classification", "deduplication_risk", "possible_debt"]},
+                                            "reason":   {"type": "string", "enum": ["unconfirmed", "no_classification", "deduplication_risk", "possible_debt"]},
                                             "notes":    {"type": "string", "description": "Una línea explicando qué no pudiste resolver"},
                                             "suggested_subcategory_code": {"type": "string", "description": "Tu hipótesis de subcategoría si aplica"},
                                         },
@@ -916,20 +916,32 @@ get_night_metrics devuelve transactions_context.matched: gastos del día que YA 
 - transactions_context.unmatched = gastos sin obligación → estos sí necesitan lectura conductual.
 
 ═══ LISTA PARA REVISIÓN DEL USUARIO ═══
-Cuando no puedas resolver alguna de estas situaciones de forma confiable, añadí la transacción a transactions_context.needs_review en create_night_analysis para que el usuario la resuelva desde la app:
+La app tiene una sección dedicada donde el usuario resuelve conflictos que vos no podés resolver solo. Cada ítem en needs_review aparece con tu nota y dos botones: "Confirmar/Aplicar" o "Editar". Los conflictos NO se resuelven solos — si no los incluís en el análisis de hoy, el usuario no los ve.
 
-1. no_classification: no hay suficiente contexto para asignar subcategoría y la transacción quedó con subcategory_code=null
-2. deduplication_risk: el mismo monto aparece en fuentes distintas (Gmail + Telegram) pero el producto/concepto no coincide exactamente — no estás seguro si es el mismo gasto o dos distintos
-3. possible_debt: el concepto sugiere pago a entidad crediticia (ej. "Abono préstamo", "Cuota libre inversión") pero no está registrado como Debt ni recurring_obligation — no estás seguro si registrarlo como gasto nuevo o si ya está capturado en otra forma
+TIPOS DE CONFLICTO:
+
+0. unconfirmed: creaste la transacción como pending porque no estabas seguro de que fuera real o querías que el usuario la confirme. El usuario puede confirmarla o editarla directamente desde la app. REGLA: toda transacción que registres con status="pending" DEBE aparecer en needs_review con reason="unconfirmed".
+
+1. no_classification: no hay suficiente contexto para asignar subcategoría y la transacción quedó con subcategory_code=null. El usuario abre el editor para clasificarla.
+
+2. deduplication_risk: el mismo monto aparece en fuentes distintas (Gmail + Telegram) pero el producto/concepto no coincide exactamente — no estás seguro si es el mismo gasto o dos distintos. El usuario puede eliminar el duplicado o confirmar que son distintos.
+
+3. possible_debt: el concepto sugiere pago a entidad crediticia (ej. "Abono préstamo", "Cuota libre inversión") pero no está registrado como Debt ni recurring_obligation. El usuario abre el editor para vincularlo.
+
+CARRY-OVER — REGLA CRÍTICA:
+Los conflictos no se resuelven solos entre día y día. En el paso 10 (get_pending_transactions) revisás las transacciones pending de días ANTERIORES. Por cada una que siga pending (el usuario no la resolvió desde la app):
+- Añadila a needs_review de HOY con reason="unconfirmed"
+- En notes: indicá la fecha original (ej: "Pendiente desde 20/05 — el usuario aún no confirmó este movimiento")
+Así el usuario ve todos los conflictos acumulados en el análisis de hoy, no solo los del día.
 
 Campos requeridos por ítem:
-- transaction_id: ID de la transacción dudosa (la que ya registraste o la que dejaste pendiente)
+- transaction_id: ID de la transacción
 - concept, amount, date: datos de la transacción
-- reason: "no_classification" | "deduplication_risk" | "possible_debt"
-- notes: una línea explicando qué no pudiste resolver (ej: "Monto $120k en Gmail no coincide con transacción Nequi del mismo día — producto distinto")
-- suggested_subcategory_code: tu hipótesis si aplica (ej: "creditos" para un posible pago de deuda)
+- reason: "unconfirmed" | "no_classification" | "deduplication_risk" | "possible_debt"
+- notes: una línea explicando qué no pudiste resolver o por qué quedó pendiente
+- suggested_subcategory_code: tu hipótesis si aplica
 
-REGLA ESTRICTA: Solo añadir lo que genuinamente no pudiste resolver con el contexto disponible. Si tenés suficiente información → clasificá directamente sin añadir a needs_review.
+REGLA ESTRICTA: Solo añadir lo que genuinamente no pudiste resolver. Si tenés suficiente información → resolvé directamente sin añadir a needs_review.
 
 ═══ FLUJO RECOMENDADO ═══
 1. get_night_metrics → pre-contextualizar: saber qué transacciones son ESPERADAS antes de procesar Gmail
