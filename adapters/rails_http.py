@@ -292,3 +292,6 @@ class RailsHttpAdapter(RailsApiPort):
         if session_id:
             body["session_id"] = session_id
         return self._post("/api/v1/agent_events", body)
+
+    def create_chat_message(self, role: str, content: str, channel: str = "app") -> dict:
+        return self._post("/api/v1/chat_messages", {"role": role, "content": content, "channel": channel})

@@ -267,6 +267,48 @@ def handle_command(api: RailsApiPort, messenger: MessengerPort, parsed: ParsedUp
 CONVERSATION_KEY = "telegram"
 
 
+def handle_app_message(
+    api: RailsApiPort,
+    messenger: MessengerPort,
+    parsed: ParsedUpdate,
+    prior_messages: list[dict] | None = None,
+) -> None:
+    """Entry point for the in-app chat channel. Uses DB-backed prior_messages instead of the in-memory store."""
+    text = (parsed.text or "").strip()
+    if not text:
+        return
+
+    initial_message = (
+        "Mensaje nuevo del usuario desde la app. "
+        "Interpretalo y actuá en tiempo real usando las herramientas disponibles. "
+        "Si es un gasto o ingreso claro, registralo. "
+        "Si es una corrección o borrado, usá transacciones recientes para resolverlo. "
+        "Si hay ambigüedad real, pedí una aclaración breve.\n\n"
+        f"Mensaje: {text}"
+    )
+
+    try:
+        initial_message = _apply_preflight(
+            api,
+            messenger,
+            initial_message=initial_message,
+            text=text,
+        )
+        if initial_message is None:
+            return
+
+        response = _run_conversation(
+            api, messenger, initial_message,
+            source_event_id=event_source_id(parsed),
+            prior_messages=prior_messages or None,
+        )
+        if response:
+            api.create_chat_message(role="assistant", content=response, channel="app")
+    except Exception as exc:
+        logger.error("[chat_agent] app_chat error: %s", exc, exc_info=True)
+        messenger.send_message("❌ No pude procesar eso. Intentá de nuevo.")
+
+
 def handle_message(api: RailsApiPort, messenger: MessengerPort, parsed: ParsedUpdate) -> None:
     text = (parsed.text or "").strip()
     if not text:
