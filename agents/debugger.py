@@ -4,7 +4,7 @@ elija la estrategia de deploy.
 
 Flujo:
   1. Recibe el payload del error (stacktrace, endpoint, params)
-  2. Lee los archivos app/ relevantes desde GitHub
+  2. Explora los 3 repos con read_file / list_files hasta entender el root cause
   3. Claude diagnostica: root cause + fix propuesto
   4. Envía resumen por Telegram con 3 opciones:
        [🚀 Hotfix a main]  [🔍 Abrir PR]  [🚫 Ignorar]
@@ -30,16 +30,45 @@ logger = logging.getLogger(__name__)
 # error_id → pending fix — persiste en memoria hasta que el usuario responda
 PENDING_FIXES: dict[int, dict] = {}
 
-SYSTEM_PROMPT = """Eres un agente debugger de la API Rails 8 (daniel15k-api).
-Tu trabajo es analizar errores 500 en producción, identificar el root cause y proponer un fix exacto.
+SYSTEM_PROMPT = """Eres un agente debugger de un sistema de finanzas personales compuesto por 3 repositorios:
 
-Arquitectura del proyecto:
-- Rails 8 API-only con DDD
-- Flujo: Controller → Interactor → Repository → Entity → Presenter
-- Dominio principal: app/domains/finanzas/
-- Modelos ActiveRecord: app/models/ (solo validaciones, associations, scopes)
+- **api** (`daniel15k-api`): Rails 8 API-only con DDD. Flujo estricto:
+  `Request → Controller → Interactor → Repository → Entity → Presenter`
+  - Controllers: solo llaman interactors y presenters. Cero lógica de negocio.
+  - Interactors: orquestan la operación. Solo conocen repositories de su dominio.
+  - Repositories: ÚNICA capa que toca ActiveRecord. Nunca en controllers ni interactors directamente.
+  - Models (`app/models/`): solo associations, scopes y validaciones de DB. Sin callbacks de negocio.
+  - Dominio principal: `app/domains/finanzas/`
 
-Cuando respondas, devuelve SIEMPRE un JSON con esta estructura exacta:
+- **agents** (`daniel15k-agents`): Python. El "Brain" — agente que se comunica con la API via HTTP.
+  El campo `source: "brain"` en transacciones indica que fue creada por el agente.
+
+- **web** (`daniel15k-web`): React frontend. Raramente relevante para errores 500 de API.
+
+**Actores del sistema:**
+- Usuario humano → autenticado con JWT, genera transacciones con `source: "manual"`, `"telegram"`, `"gmail"`
+- Agente Brain → autenticado con service token, genera transacciones con `source: "brain"`
+- Cuenta (`Account`) → agrupa los datos financieros del usuario
+
+**Invariantes clave:**
+- `Transaction.SOURCES` en `app/models/transaction.rb` define los valores válidos de `source`
+- `recurring_obligations.amount` es la fuente de verdad del impacto mensual, no `debts.monthly_payment`
+- `safe_to_deploy` = dinero disponible después de compromisos del próximo ciclo
+
+**Tu proceso de diagnóstico:**
+1. Analiza el stacktrace para identificar qué archivos están involucrados
+2. Usa `read_file` y `list_files` para explorar el código relevante — NO asumas, LEE el código
+3. Sigue la cadena: controller → interactor → repository → model → spec
+4. Cuando el error es de validación, siempre lee el modelo ActiveRecord afectado
+5. Lee specs relacionados si necesitás entender el comportamiento esperado
+
+**Reglas para el fix:**
+- El fix debe ser MÍNIMO — una línea si es posible
+- Nunca cambies la arquitectura DDD ni el flujo del interactor
+- Si el problema es un allowlist/enum en el modelo, agrégalo ahí — no cambies el valor en el interactor
+- No inventes clases, gems ni métodos que no existan en el proyecto
+
+Cuando tengas suficiente contexto, devuelve ÚNICAMENTE un JSON con esta estructura:
 {
   "diagnosis": "explicación del root cause en 1-2 oraciones",
   "fix": {
@@ -51,8 +80,61 @@ Cuando respondas, devuelve SIEMPRE un JSON con esta estructura exacta:
   "confidence_reason": "por qué tenés esa confianza en el fix"
 }
 
-Si no podés proponer un fix concreto, omite el campo "fix" y explicá en "diagnosis" qué necesitaría revisión manual.
+Si no podés proponer un fix concreto, omite "fix" y explicá en "diagnosis" qué necesita revisión manual.
 """
+
+TOOLS = [
+    {
+        "name": "read_file",
+        "description": "Lee el contenido completo de un archivo de uno de los 3 repos del proyecto.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Ruta relativa al root del repo. Ej: app/models/transaction.rb",
+                },
+                "repo": {
+                    "type": "string",
+                    "enum": ["api", "agents", "web"],
+                    "description": "api=Rails backend, agents=Python Brain, web=React frontend",
+                },
+            },
+            "required": ["path", "repo"],
+        },
+    },
+    {
+        "name": "list_files",
+        "description": "Lista los archivos y carpetas de un directorio de uno de los 3 repos.",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": "Ruta del directorio. Ej: app/domains/finanzas/interactors",
+                },
+                "repo": {
+                    "type": "string",
+                    "enum": ["api", "agents", "web"],
+                },
+            },
+            "required": ["path", "repo"],
+        },
+    },
+]
+
+TOOL_MAP = {
+    "read_file": lambda args: {
+        "content": github_client.get_file(args["path"], repo=args.get("repo", "api")) or "File not found",
+        "path": args["path"],
+        "repo": args.get("repo", "api"),
+    },
+    "list_files": lambda args: {
+        "files": github_client.list_files(args.get("path", ""), repo=args.get("repo", "api")) or [],
+        "path": args.get("path", ""),
+        "repo": args.get("repo", "api"),
+    },
+}
 
 
 @dataclass
@@ -67,28 +149,8 @@ class DebugPayload:
     params: dict[str, Any]
 
 
-def _extract_app_files(stacktrace: list[str]) -> list[str]:
-    # Docker runs from /app so stacktraces show /app/app/domains/...
-    # The negative lookahead skips the first "app/" and captures the real relative path.
-    files, seen = [], set()
-    for line in stacktrace:
-        m = re.search(r"\b(app/(?!app/)[^:]+\.rb)", line)
-        if m and m.group(1) not in seen:
-            seen.add(m.group(1))
-            files.append(m.group(1))
-    return files[:6]
-
-
-def _build_context(payload: DebugPayload) -> str:
-    files_content = []
-    for path in _extract_app_files(payload.stacktrace):
-        content = github_client.get_file(path)
-        if content:
-            files_content.append(f"### {path}\n```ruby\n{content}\n```")
-
-    stacktrace_str = "\n".join(payload.stacktrace[:15])
-    files_str = "\n\n".join(files_content) if files_content else "_No se pudieron leer archivos._"
-
+def _build_initial_message(payload: DebugPayload) -> str:
+    stacktrace_str = "\n".join(payload.stacktrace[:20])
     return f"""## Error en producción
 
 **Exception:** `{payload.exception_class}`
@@ -101,11 +163,8 @@ def _build_context(payload: DebugPayload) -> str:
 {stacktrace_str}
 ```
 
-## Archivos relevantes
-
-{files_str}
-
-Diagnosticá el root cause y proponé el fix. Devolvé únicamente el JSON solicitado."""
+Explorá el código con `read_file` y `list_files` hasta entender el root cause completo.
+Cuando estés seguro, devolvé el JSON con diagnosis + fix."""
 
 
 def handle(payload: DebugPayload) -> None:
@@ -121,14 +180,14 @@ def handle(payload: DebugPayload) -> None:
             api_key=os.environ.get("OPENAI_API_KEY") or os.environ.get("OPEN_AI_API_KEY", ""),
             provider_name="openai",
             base_url="https://api.openai.com/v1",
-            default_model="gpt-5.4",
+            default_model="gpt-4.1",
         )
         result = _parse_response(provider.run_agent(
             system_prompt=SYSTEM_PROMPT,
-            tools=[],
-            tool_map={},
-            initial_message=_build_context(payload),
-            max_iterations=1,
+            tools=TOOLS,
+            tool_map=TOOL_MAP,
+            initial_message=_build_initial_message(payload),
+            max_iterations=10,
         ))
 
         if not result:
@@ -139,9 +198,9 @@ def handle(payload: DebugPayload) -> None:
             )
             return
 
-        diagnosis  = result.get("diagnosis", "Sin diagnóstico")
-        fix        = result.get("fix")
-        confidence = result.get("confidence", "low")
+        diagnosis   = result.get("diagnosis", "Sin diagnóstico")
+        fix         = result.get("fix")
+        confidence  = result.get("confidence", "low")
         conf_reason = result.get("confidence_reason", "")
 
         PENDING_FIXES[payload.error_id] = {
