@@ -16,6 +16,16 @@ GITHUB_REPO  = os.environ.get("GITHUB_REPO", "carreraprogrammer/daniel15k-api")
 GH_BASE      = "https://api.github.com"
 TIMEOUT      = 15
 
+REPOS = {
+    "api":    os.environ.get("GITHUB_REPO",        "carreraprogrammer/daniel15k-api"),
+    "agents": os.environ.get("GITHUB_REPO_AGENTS", "carreraprogrammer/daniel15k-agents"),
+    "web":    os.environ.get("GITHUB_REPO_WEB",    "carreraprogrammer/daniel15k-web"),
+}
+
+
+def _repo(alias: str) -> str:
+    return REPOS.get(alias, alias)
+
 
 def _headers() -> dict:
     return {
@@ -25,15 +35,34 @@ def _headers() -> dict:
     }
 
 
-def get_file(path: str, ref: str = "main") -> str | None:
-    url = f"{GH_BASE}/repos/{GITHUB_REPO}/contents/{path}"
+def get_file(path: str, ref: str = "main", repo: str | None = None) -> str | None:
+    target = _repo(repo) if repo else GITHUB_REPO
+    url = f"{GH_BASE}/repos/{target}/contents/{path}"
     try:
         r = httpx.get(url, headers=_headers(), params={"ref": ref}, timeout=TIMEOUT)
         r.raise_for_status()
         content = r.json().get("content", "")
         return base64.b64decode(content).decode("utf-8")
     except Exception as e:
-        logger.warning("[github_client] get_file %s failed: %s", path, e)
+        logger.warning("[github_client] get_file %s (%s) failed: %s", path, target, e)
+        return None
+
+
+def list_files(path: str = "", ref: str = "main", repo: str | None = None) -> list[str] | None:
+    target = _repo(repo) if repo else GITHUB_REPO
+    url = f"{GH_BASE}/repos/{target}/contents/{path}"
+    try:
+        r = httpx.get(url, headers=_headers(), params={"ref": ref}, timeout=TIMEOUT)
+        r.raise_for_status()
+        entries = r.json()
+        if not isinstance(entries, list):
+            return None
+        return [
+            f"{'📁' if e['type'] == 'dir' else '📄'} {e['path']}"
+            for e in entries
+        ]
+    except Exception as e:
+        logger.warning("[github_client] list_files %s (%s) failed: %s", path, target, e)
         return None
 
 
