@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 
-from routers import webhook, agents
+from routers import webhook, agents, errors
 import scheduler as sched
 
 load_dotenv()
@@ -46,6 +46,7 @@ app = FastAPI(
 # ── Routers ──────────────────────────────────────────────────────────────────
 app.include_router(webhook.router)
 app.include_router(agents.router)
+app.include_router(errors.router)
 
 
 # ── Health ───────────────────────────────────────────────────────────────────
