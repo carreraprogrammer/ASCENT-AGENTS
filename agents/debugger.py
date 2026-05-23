@@ -180,7 +180,7 @@ def handle(payload: DebugPayload) -> None:
             api_key=os.environ.get("OPENAI_API_KEY") or os.environ.get("OPEN_AI_API_KEY", ""),
             provider_name="openai",
             base_url="https://api.openai.com/v1",
-            default_model="gpt-4.1",
+            default_model="gpt-5.4",
         )
         result = _parse_response(provider.run_agent(
             system_prompt=SYSTEM_PROMPT,
