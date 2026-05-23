@@ -70,7 +70,7 @@ class DebugPayload:
 def _extract_app_files(stacktrace: list[str]) -> list[str]:
     files, seen = [], set()
     for line in stacktrace:
-        m = re.match(r"(app/[^:]+\.rb)", line)
+        m = re.search(r"(app/[^:]+\.rb)", line)
         if m and m.group(1) not in seen:
             seen.add(m.group(1))
             files.append(m.group(1))
