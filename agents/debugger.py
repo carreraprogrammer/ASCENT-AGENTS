@@ -68,9 +68,11 @@ class DebugPayload:
 
 
 def _extract_app_files(stacktrace: list[str]) -> list[str]:
+    # Docker runs from /app so stacktraces show /app/app/domains/...
+    # The negative lookahead skips the first "app/" and captures the real relative path.
     files, seen = [], set()
     for line in stacktrace:
-        m = re.search(r"(app/[^:]+\.rb)", line)
+        m = re.search(r"\b(app/(?!app/)[^:]+\.rb)", line)
         if m and m.group(1) not in seen:
             seen.add(m.group(1))
             files.append(m.group(1))
