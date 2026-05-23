@@ -22,6 +22,7 @@ from adapters.rails_http import RailsHttpAdapter
 from adapters.telegram_messenger import TelegramMessenger
 from services import callback_handler
 from agents import chat as chat_agent
+from agents import debugger as debugger_agent
 from ports.messenger import UserIntent
 
 logger = logging.getLogger(__name__)
@@ -65,7 +66,25 @@ async def telegram_webhook(request: Request) -> Response:
 
 async def _dispatch(api: RailsHttpAdapter, messenger: TelegramMessenger, parsed) -> None:
 
-    # 1. Categorización de transacciones (cat / confirm / skip) ───────────────
+    # 1a. Debugger approval/reject ────────────────────────────────────────────
+    if parsed.intent == UserIntent.CATEGORIZATION_CALLBACK:
+        data = parsed.callback_data or ""
+        if data.startswith("debug:approve:"):
+            messenger.answer_callback(parsed.callback_query_id, "⏳ Abriendo PR...")
+            error_id = int(data.split(":")[-1])
+            asyncio.get_event_loop().run_in_executor(
+                None, debugger_agent.handle_approve, error_id
+            )
+            return
+        if data.startswith("debug:reject:"):
+            messenger.answer_callback(parsed.callback_query_id, "🚫 Ignorado")
+            error_id = int(data.split(":")[-1])
+            asyncio.get_event_loop().run_in_executor(
+                None, debugger_agent.handle_reject, error_id
+            )
+            return
+
+    # 1b. Categorización de transacciones (cat / confirm / skip) ──────────────
     if parsed.intent == UserIntent.CATEGORIZATION_CALLBACK:
         messenger.answer_callback(parsed.callback_query_id, "✅")
         callback_handler.handle(api, messenger, parsed.callback_data or "")
