@@ -21,7 +21,7 @@ from typing import Any
 
 from adapters.telegram_messenger import TelegramMessenger
 from services import github_client
-from services.claude_client import run_agent
+from services.llm_factory import build_llm_provider
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +113,8 @@ def handle(payload: DebugPayload) -> None:
             f"<code>{payload.http_method} {payload.endpoint}</code>"
         )
 
-        result = _parse_response(run_agent(
+        provider = build_llm_provider()
+        result = _parse_response(provider.run_agent(
             system_prompt=SYSTEM_PROMPT,
             tools=[],
             tool_map={},
