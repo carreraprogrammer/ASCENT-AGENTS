@@ -19,9 +19,11 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+import os
+
+from adapters.openai_compatible_llm import OpenAICompatibleLlmProvider
 from adapters.telegram_messenger import TelegramMessenger
 from services import github_client
-from services.llm_factory import build_llm_provider
 
 logger = logging.getLogger(__name__)
 
@@ -113,7 +115,12 @@ def handle(payload: DebugPayload) -> None:
             f"<code>{payload.http_method} {payload.endpoint}</code>"
         )
 
-        provider = build_llm_provider()
+        provider = OpenAICompatibleLlmProvider(
+            api_key=os.environ.get("OPENAI_API_KEY") or os.environ.get("OPEN_AI_API_KEY", ""),
+            provider_name="openai",
+            base_url="https://api.openai.com/v1",
+            default_model="gpt-5.5-turbo",
+        )
         result = _parse_response(provider.run_agent(
             system_prompt=SYSTEM_PROMPT,
             tools=[],
