@@ -66,14 +66,21 @@ async def telegram_webhook(request: Request) -> Response:
 
 async def _dispatch(api: RailsHttpAdapter, messenger: TelegramMessenger, parsed) -> None:
 
-    # 1a. Debugger approval/reject ────────────────────────────────────────────
+    # 1a. Debugger callbacks ───────────────────────────────────────────────────
     if parsed.intent == UserIntent.CATEGORIZATION_CALLBACK:
         data = parsed.callback_data or ""
-        if data.startswith("debug:approve:"):
-            messenger.answer_callback(parsed.callback_query_id, "⏳ Abriendo PR...")
+        if data.startswith("debug:hotfix:"):
+            messenger.answer_callback(parsed.callback_query_id, "🚀 Pusheando hotfix...")
             error_id = int(data.split(":")[-1])
             asyncio.get_event_loop().run_in_executor(
-                None, debugger_agent.handle_approve, error_id
+                None, debugger_agent.handle_hotfix, error_id
+            )
+            return
+        if data.startswith("debug:pr:"):
+            messenger.answer_callback(parsed.callback_query_id, "🔍 Creando PR...")
+            error_id = int(data.split(":")[-1])
+            asyncio.get_event_loop().run_in_executor(
+                None, debugger_agent.handle_pr, error_id
             )
             return
         if data.startswith("debug:reject:"):

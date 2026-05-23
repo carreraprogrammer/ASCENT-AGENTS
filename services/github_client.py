@@ -109,11 +109,20 @@ def create_pr(title: str, body: str, branch: str) -> str | None:
         return None
 
 
+def hotfix_main(error_id: int, file_path: str, new_content: str,
+                fix_description: str) -> bool:
+    """Push directo a main — Railway despliega automáticamente."""
+    commit_msg = (
+        f"hotfix: {fix_description[:70]}\n\n"
+        f"Auto-hotfix for error_report #{error_id}\n\n"
+        f"Co-Authored-By: Debugger Agent <noreply@anthropic.com>"
+    )
+    return update_file(file_path, new_content, commit_msg, "main")
+
+
 def open_fix_pr(error_id: int, error_hash: str, file_path: str, new_content: str,
                 diagnosis: str, fix_description: str) -> str | None:
-    """
-    Crea una branch, actualiza el archivo y abre el PR. Retorna la PR URL o None.
-    """
+    """Crea branch + PR para revisión. Retorna la PR URL o None."""
     main_sha = get_main_sha()
     if not main_sha:
         return None
