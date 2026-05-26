@@ -932,10 +932,10 @@ CÓMO MARCAR CONFLICTOS — REGLA ARQUITECTURAL:
 Los conflictos NO van en create_night_analysis. Van directamente en la transacción mediante update_transaction con metadata. La app los enlista en tiempo real consultando las transacciones.
 
 - unconfirmed: simplemente dejá la transacción con status="pending". La app la detecta automáticamente.
-  No hace falta metadata adicional salvo que quieras dejar una nota: metadata={ "conflict_notes": "..." }
+  No hace falta metadata adicional salvo que quieras dejar una nota: metadata={{ "conflict_notes": "..." }}
 
 - no_classification, deduplication_risk, possible_debt: usá update_transaction con:
-  metadata={ "conflict_reason": "deduplication_risk", "conflict_notes": "Monto $120k en Gmail no coincide con Nequi del mismo día — producto distinto", "suggested_subcategory_code": "creditos" }
+  metadata={{ "conflict_reason": "deduplication_risk", "conflict_notes": "Monto $120k en Gmail no coincide con Nequi del mismo día — producto distinto", "suggested_subcategory_code": "creditos" }}
   La transacción puede quedar confirmed o pending según el caso.
 
 El campo needs_review en create_night_analysis ya no se usa — no lo incluyas.
