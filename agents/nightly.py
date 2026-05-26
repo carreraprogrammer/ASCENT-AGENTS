@@ -57,7 +57,7 @@ def _extract_body(msg) -> str:
     return body[:3000]
 
 
-def _fetch_gmail_emails() -> dict:
+def _fetch_gmail_emails(since_date: str | None = None) -> dict:
     remitentes = [
         "BANCO_DAVIVIENDA@davivienda.com",
         "notificaciones@nequi.com.co",
@@ -65,7 +65,7 @@ def _fetch_gmail_emails() -> dict:
         "notificaciones@davivienda.com",
     ]
     # Use Colombia timezone — nightly runs at 4am UTC = 11pm Colombia (next UTC day)
-    hoy_str = datetime.now(COLOMBIA_TZ).date().strftime("%d-%b-%Y")
+    hoy_str = since_date or datetime.now(COLOMBIA_TZ).date().strftime("%d-%b-%Y")
     emails = []
     try:
         mail = imaplib.IMAP4_SSL("imap.gmail.com")
@@ -155,8 +155,9 @@ def _normalize_transaction_payload(payload: dict) -> dict:
     return normalized
 
 
-def build_tool_map(api: RailsApiPort, messenger: MessengerPort) -> dict:
-    now_col = datetime.now(COLOMBIA_TZ)
+def build_tool_map(api: RailsApiPort, messenger: MessengerPort,
+                   target_date: datetime | None = None) -> dict:
+    now_col = target_date or datetime.now(COLOMBIA_TZ)
 
     def get_telegram_messages(_input: dict) -> dict:
         """
@@ -197,7 +198,8 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort) -> dict:
             return {"ok": False, "error": str(e)}
 
     def get_gmail_emails(_input: dict) -> dict:
-        return _fetch_gmail_emails()
+        since = now_col.date().strftime("%d-%b-%Y")
+        return _fetch_gmail_emails(since_date=since)
 
     def get_transactions(inp: dict) -> dict:
         month = inp.get("month", now_col.month)
@@ -987,12 +989,13 @@ REGLA ESTRICTA: Solo marcá conflictos genuinos. Si tenés suficiente informaci�
 [Si completeness está todo sufficient, omitir esta sección completamente]"""
 
 
-def run_nightly(api: RailsApiPort, messenger: MessengerPort) -> None:
-    now_col = datetime.now(COLOMBIA_TZ)
+def run_nightly(api: RailsApiPort, messenger: MessengerPort,
+                target_date: datetime | None = None) -> None:
+    now_col = target_date or datetime.now(COLOMBIA_TZ)
     fecha = now_col.strftime("%d/%m/%Y")
     print(f"\n=== Revisión nocturna Brain — {fecha} ===\n")
 
-    tool_map = build_tool_map(api, messenger)
+    tool_map = build_tool_map(api, messenger, target_date=now_col)
 
     provider = build_llm_provider()
     provider.run_agent(

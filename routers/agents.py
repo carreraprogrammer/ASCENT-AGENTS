@@ -11,6 +11,7 @@ routers/agents.py — Endpoints HTTP para disparar agentes manualmente.
 import logging
 import os
 from datetime import datetime, timezone, timedelta
+from agents.nightly import COLOMBIA_TZ
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from pydantic import BaseModel
@@ -55,6 +56,23 @@ async def trigger_nightly(background_tasks: BackgroundTasks) -> dict:
     messenger = TelegramMessenger()
     background_tasks.add_task(run_nightly, api, messenger)
     return {"ok": True, "message": "Revisión nocturna iniciada en background."}
+
+
+@router.post("/nightly/recovery")
+async def trigger_nightly_recovery(background_tasks: BackgroundTasks, date: str) -> dict:
+    """Dispara la revisión nocturna para una fecha pasada (formato: YYYY-MM-DD).
+    Útil para recuperar análisis de días que fallaron por bug en el scheduler."""
+    from datetime import datetime
+    try:
+        target = datetime.strptime(date, "%Y-%m-%d").replace(
+            tzinfo=COLOMBIA_TZ, hour=23, minute=0
+        )
+    except ValueError:
+        return {"ok": False, "error": "Formato de fecha inválido. Usar YYYY-MM-DD."}
+    api = RailsHttpAdapter()
+    messenger = TelegramMessenger()
+    background_tasks.add_task(run_nightly, api, messenger, target)
+    return {"ok": True, "message": f"Revisión nocturna de {date} iniciada en background."}
 
 
 @router.post("/planning")
