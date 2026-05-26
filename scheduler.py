@@ -19,12 +19,13 @@ _scheduler: AsyncIOScheduler | None = None
 
 def _make_scheduler() -> AsyncIOScheduler:
     from adapters.rails_http import RailsHttpAdapter
-    from adapters.telegram_messenger import TelegramMessenger
+    from adapters.app_messenger import AppMessenger
     from agents.nightly import run_nightly
 
     scheduler = AsyncIOScheduler(timezone="UTC")
 
     # ── Revisión nocturna — 11pm Colombia (04:00 UTC) ────────────────────────
+    api = RailsHttpAdapter()
     scheduler.add_job(
         func=run_nightly,
         trigger=CronTrigger(hour=4, minute=0),
@@ -32,8 +33,8 @@ def _make_scheduler() -> AsyncIOScheduler:
         name="Revisión nocturna Daniel 15K",
         replace_existing=True,
         kwargs={
-            "api":       RailsHttpAdapter(),
-            "messenger": TelegramMessenger(),
+            "api":       api,
+            "messenger": AppMessenger(api, session_id="nightly"),
         },
     )
 

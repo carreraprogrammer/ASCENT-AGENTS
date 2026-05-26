@@ -52,17 +52,16 @@ class WebChatRequest(BaseModel):
 @router.post("/nightly")
 async def trigger_nightly(background_tasks: BackgroundTasks) -> dict:
     """Dispara la revisión nocturna en background."""
+    from adapters.app_messenger import AppMessenger
     api = RailsHttpAdapter()
-    messenger = TelegramMessenger()
-    background_tasks.add_task(run_nightly, api, messenger)
+    background_tasks.add_task(run_nightly, api, AppMessenger(api, session_id="nightly"))
     return {"ok": True, "message": "Revisión nocturna iniciada en background."}
 
 
 @router.post("/nightly/recovery")
 async def trigger_nightly_recovery(background_tasks: BackgroundTasks, date: str) -> dict:
-    """Dispara la revisión nocturna para una fecha pasada (formato: YYYY-MM-DD).
-    Útil para recuperar análisis de días que fallaron por bug en el scheduler."""
-    from datetime import datetime
+    """Dispara la revisión nocturna para una fecha pasada (formato: YYYY-MM-DD)."""
+    from adapters.app_messenger import AppMessenger
     try:
         target = datetime.strptime(date, "%Y-%m-%d").replace(
             tzinfo=COLOMBIA_TZ, hour=23, minute=0
@@ -70,8 +69,7 @@ async def trigger_nightly_recovery(background_tasks: BackgroundTasks, date: str)
     except ValueError:
         return {"ok": False, "error": "Formato de fecha inválido. Usar YYYY-MM-DD."}
     api = RailsHttpAdapter()
-    messenger = TelegramMessenger()
-    background_tasks.add_task(run_nightly, api, messenger, target)
+    background_tasks.add_task(run_nightly, api, AppMessenger(api, session_id="nightly"), target)
     return {"ok": True, "message": f"Revisión nocturna de {date} iniciada en background."}
 
 
