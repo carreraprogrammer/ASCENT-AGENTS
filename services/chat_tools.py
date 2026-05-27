@@ -706,7 +706,7 @@ def build_tool_map(
     def _patch(path: str, body: dict) -> dict:
         response = httpx.patch(
             f"{API_URL}{path}",
-            headers=build_auth_headers(),
+            headers=api.headers(),
             json=body,
             timeout=15,
         )
@@ -717,7 +717,7 @@ def build_tool_map(
     def _delete(path: str) -> dict:
         response = httpx.delete(
             f"{API_URL}{path}",
-            headers=build_auth_headers(),
+            headers=api.headers(),
             timeout=15,
         )
         response.raise_for_status()
@@ -727,7 +727,7 @@ def build_tool_map(
     def _post(path: str, body: dict) -> dict:
         response = httpx.post(
             f"{API_URL}{path}",
-            headers=build_auth_headers(),
+            headers=api.headers(),
             json=body,
             timeout=15,
         )
@@ -864,7 +864,7 @@ def build_tool_map(
 
         response = httpx.post(
             f"{API_URL}/api/v1/transactions/batch",
-            headers=build_auth_headers(),
+            headers=api.headers(),
             json={"transactions": prepared},
             timeout=30,
         )
@@ -955,7 +955,7 @@ def build_tool_map(
 
         response = httpx.post(
             f"{API_URL}/api/v1/agent_events",
-            headers=build_auth_headers(),
+            headers=api.headers(),
             json=body,
             timeout=15,
         )
