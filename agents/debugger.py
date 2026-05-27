@@ -1,25 +1,26 @@
 """
-agents/debugger.py — Sub-agente que diagnostica errores 500 y deja que el usuario
+agents/debugger.py — Sub-agente que diagnostica errores y deja que el usuario
 elija la estrategia de deploy.
 
 Flujo:
   1. Recibe el payload del error (stacktrace, endpoint, params)
   2. Explora los 3 repos con read_file / list_files hasta entender el root cause
-  3. Claude diagnostica: root cause + fix propuesto
-  4. Envía resumen por Telegram con 3 opciones:
-       [🚀 Hotfix a main]  [🔍 Abrir PR]  [🚫 Ignorar]
+  3. Diagnostica: user_story + why_it_happened + root cause técnico + fix
+  4. Envía resumen por Telegram con opciones:
+       [🚀 Hotfix a main]  [🔍 Abrir PR]  [💬 Preguntar]  [🚫 Ignorar]
   5. Hotfix → push directo a main → Railway despliega automáticamente
      PR      → branch nueva + PR para revisión detallada
+     Preguntar → conversación con el agente que analizó el error
      Ignorar → descarta sin acción
 """
 
 import json
 import logging
-import re
-from dataclasses import dataclass
-from typing import Any
-
 import os
+import re
+from dataclasses import dataclass, field
+from datetime import datetime, timezone, timedelta
+from typing import Any
 
 from adapters.openai_compatible_llm import OpenAICompatibleLlmProvider
 from adapters.telegram_messenger import TelegramMessenger
@@ -27,8 +28,14 @@ from services import github_client
 
 logger = logging.getLogger(__name__)
 
-# error_id → pending fix — persiste en memoria hasta que el usuario responda
+COLOMBIA_TZ = timezone(timedelta(hours=-5))
+
+# error_id → contexto completo — persiste en memoria hasta que el usuario responda
 PENDING_FIXES: dict[int, dict] = {}
+
+# error_id del error sobre el que el usuario está haciendo preguntas (None si no hay sesión activa)
+_ACTIVE_QUESTION_SESSION: int | None = None
+
 
 SYSTEM_PROMPT = """Eres un agente debugger de un sistema de finanzas personales compuesto por 3 repositorios:
 
@@ -70,7 +77,9 @@ SYSTEM_PROMPT = """Eres un agente debugger de un sistema de finanzas personales 
 
 Cuando tengas suficiente contexto, devuelve ÚNICAMENTE un JSON con esta estructura:
 {
-  "diagnosis": "explicación del root cause en 1-2 oraciones",
+  "user_story": "qué intentaba hacer el usuario o el agente cuando falló, en lenguaje llano (1-2 oraciones, sin jerga técnica)",
+  "why_it_happened": "por qué falló, en lenguaje claro y directo — sin tecnicismos (1-2 oraciones)",
+  "diagnosis": "root cause técnico preciso: qué clase/archivo/validación lo causó (1-2 oraciones técnicas)",
   "fix": {
     "file": "app/ruta/al/archivo.rb",
     "description": "descripción del cambio en menos de 80 caracteres",
@@ -147,6 +156,26 @@ class DebugPayload:
     endpoint: str
     http_method: str
     params: dict[str, Any]
+    occurred_at: str = ""
+
+
+def _format_time(occurred_at: str) -> str:
+    if not occurred_at:
+        return "hora desconocida"
+    try:
+        dt = datetime.fromisoformat(occurred_at).astimezone(COLOMBIA_TZ)
+        return dt.strftime("%-d/%-m a las %-I:%M %p").replace("AM", "am").replace("PM", "pm")
+    except Exception:
+        return occurred_at[:16]
+
+
+def _make_provider() -> OpenAICompatibleLlmProvider:
+    return OpenAICompatibleLlmProvider(
+        api_key=os.environ.get("OPENAI_API_KEY") or os.environ.get("OPEN_AI_API_KEY", ""),
+        provider_name="openai",
+        base_url="https://api.openai.com/v1",
+        default_model="gpt-5.4",
+    )
 
 
 def _build_initial_message(payload: DebugPayload) -> str:
@@ -164,7 +193,7 @@ def _build_initial_message(payload: DebugPayload) -> str:
 ```
 
 Explorá el código con `read_file` y `list_files` hasta entender el root cause completo.
-Cuando estés seguro, devolvé el JSON con diagnosis + fix."""
+Cuando estés seguro, devolvé el JSON con user_story + why_it_happened + diagnosis + fix."""
 
 
 def handle(payload: DebugPayload) -> None:
@@ -176,13 +205,7 @@ def handle(payload: DebugPayload) -> None:
             f"<code>{payload.http_method} {payload.endpoint}</code>"
         )
 
-        provider = OpenAICompatibleLlmProvider(
-            api_key=os.environ.get("OPENAI_API_KEY") or os.environ.get("OPEN_AI_API_KEY", ""),
-            provider_name="openai",
-            base_url="https://api.openai.com/v1",
-            default_model="gpt-5.4",
-        )
-        result = _parse_response(provider.run_agent(
+        result = _parse_response(_make_provider().run_agent(
             system_prompt=SYSTEM_PROMPT,
             tools=TOOLS,
             tool_map=TOOL_MAP,
@@ -198,40 +221,58 @@ def handle(payload: DebugPayload) -> None:
             )
             return
 
-        diagnosis   = result.get("diagnosis", "Sin diagnóstico")
-        fix         = result.get("fix")
-        confidence  = result.get("confidence", "low")
-        conf_reason = result.get("confidence_reason", "")
+        user_story     = result.get("user_story", "")
+        why_happened   = result.get("why_it_happened", "")
+        diagnosis      = result.get("diagnosis", "Sin diagnóstico")
+        fix            = result.get("fix")
+        confidence     = result.get("confidence", "low")
+        conf_reason    = result.get("confidence_reason", "")
+        time_str       = _format_time(payload.occurred_at)
 
         PENDING_FIXES[payload.error_id] = {
-            "payload":   payload,
-            "fix":       fix,
-            "diagnosis": diagnosis,
+            "payload":       payload,
+            "fix":           fix,
+            "diagnosis":     diagnosis,
+            "user_story":    user_story,
+            "why_happened":  why_happened,
         }
 
         confidence_emoji = {"high": "🟢", "medium": "🟡", "low": "🔴"}.get(confidence, "⚪")
+        confidence_label = {"high": "alta", "medium": "media", "low": "baja"}.get(confidence, confidence)
+
+        user_story_block   = f"\n\n👤 <b>¿Qué pasó?</b>\n{user_story}" if user_story else ""
+        why_happened_block = f"\n\n❓ <b>¿Por qué?</b>\n{why_happened}" if why_happened else ""
 
         if fix:
-            fix_line = f"\n\n🔧 <b>Fix:</b> <code>{fix.get('file', '')}</code>\n{fix.get('description', '')}"
+            fix_block = (
+                f"\n\n🔧 <b>Fix propuesto</b>\n"
+                f"<code>{fix.get('file', '')}</code>\n"
+                f"{fix.get('description', '')}"
+            )
             buttons = [[
                 {"text": "🚀 Hotfix a main", "callback_data": f"debug:hotfix:{payload.error_id}"},
                 {"text": "🔍 Abrir PR",      "callback_data": f"debug:pr:{payload.error_id}"},
+            ], [
+                {"text": "💬 Preguntar",     "callback_data": f"debug:ask:{payload.error_id}"},
                 {"text": "🚫 Ignorar",       "callback_data": f"debug:reject:{payload.error_id}"},
             ]]
         else:
-            fix_line = "\n\n<i>No hay fix automático — requiere revisión manual.</i>"
+            fix_block = "\n\n<i>No hay fix automático — requiere revisión manual.</i>"
             buttons = [[
-                {"text": "🚫 Ignorar", "callback_data": f"debug:reject:{payload.error_id}"},
+                {"text": "💬 Preguntar", "callback_data": f"debug:ask:{payload.error_id}"},
+                {"text": "🚫 Ignorar",   "callback_data": f"debug:reject:{payload.error_id}"},
             ]]
 
         messenger.send_with_buttons(
             text=(
-                f"🐛 <b>Error en producción</b>\n\n"
-                f"<b>Exception:</b> <code>{payload.exception_class}</code>\n"
-                f"<b>Endpoint:</b> <code>{payload.http_method} {payload.endpoint}</code>\n\n"
-                f"📋 <b>Diagnóstico</b>\n{diagnosis}"
-                f"{fix_line}\n\n"
-                f"{confidence_emoji} Confianza: <b>{confidence}</b> — {conf_reason}"
+                f"🐛 <b>Error detectado</b> — {time_str}"
+                f"{user_story_block}"
+                f"{why_happened_block}\n\n"
+                f"📋 <b>Técnico</b>\n"
+                f"<code>{payload.exception_class}</code> en <code>{payload.http_method} {payload.endpoint}</code>\n"
+                f"{diagnosis}"
+                f"{fix_block}\n\n"
+                f"{confidence_emoji} Confianza <b>{confidence_label}</b> — {conf_reason}"
             ),
             buttons=buttons,
         )
@@ -242,8 +283,11 @@ def handle(payload: DebugPayload) -> None:
 
 
 def handle_hotfix(error_id: int) -> None:
+    global _ACTIVE_QUESTION_SESSION
     messenger = TelegramMessenger()
     pending = PENDING_FIXES.pop(error_id, None)
+    if error_id == _ACTIVE_QUESTION_SESSION:
+        _ACTIVE_QUESTION_SESSION = None
 
     if not pending or not pending.get("fix"):
         messenger.send_message("⚠️ No encontré el fix (puede haber expirado si el agente se reinició).")
@@ -271,8 +315,11 @@ def handle_hotfix(error_id: int) -> None:
 
 
 def handle_pr(error_id: int) -> None:
+    global _ACTIVE_QUESTION_SESSION
     messenger = TelegramMessenger()
     pending = PENDING_FIXES.pop(error_id, None)
+    if error_id == _ACTIVE_QUESTION_SESSION:
+        _ACTIVE_QUESTION_SESSION = None
 
     if not pending or not pending.get("fix"):
         messenger.send_message("⚠️ No encontré el fix (puede haber expirado si el agente se reinició).")
@@ -302,8 +349,70 @@ def handle_pr(error_id: int) -> None:
 
 
 def handle_reject(error_id: int) -> None:
+    global _ACTIVE_QUESTION_SESSION
     PENDING_FIXES.pop(error_id, None)
+    if error_id == _ACTIVE_QUESTION_SESSION:
+        _ACTIVE_QUESTION_SESSION = None
     TelegramMessenger().send_message(f"🚫 Error #{error_id} ignorado.")
+
+
+def handle_ask(error_id: int) -> None:
+    global _ACTIVE_QUESTION_SESSION
+    pending = PENDING_FIXES.get(error_id)
+    if not pending:
+        TelegramMessenger().send_message("⚠️ Este error ya no está en memoria.")
+        return
+    _ACTIVE_QUESTION_SESSION = error_id
+    TelegramMessenger().send_message(
+        f"💬 <b>Preguntale al agente sobre el error #{error_id}</b>\n\n"
+        f"Escribí tu pregunta directamente. El agente tiene todo el contexto del análisis.\n\n"
+        f"<i>Cuando termines, usá los botones del mensaje anterior para tomar acción.</i>"
+    )
+
+
+def handle_question(question: str) -> None:
+    """Responde una pregunta sobre el error activo usando el contexto del análisis previo."""
+    global _ACTIVE_QUESTION_SESSION
+    messenger = TelegramMessenger()
+
+    error_id = _ACTIVE_QUESTION_SESSION
+    if error_id is None:
+        return
+
+    pending = PENDING_FIXES.get(error_id)
+    if not pending:
+        _ACTIVE_QUESTION_SESSION = None
+        messenger.send_message("⚠️ El contexto del error ya no está en memoria.")
+        return
+
+    payload: DebugPayload = pending["payload"]
+    fix = pending.get("fix") or {}
+
+    context = (
+        f"Contexto del error analizado (error_id={error_id}):\n\n"
+        f"- Excepción: {payload.exception_class}: {payload.message[:200]}\n"
+        f"- Endpoint: {payload.http_method} {payload.endpoint}\n"
+        f"- Historia de usuario: {pending.get('user_story', '')}\n"
+        f"- Por qué ocurrió: {pending.get('why_happened', '')}\n"
+        f"- Diagnóstico técnico: {pending.get('diagnosis', '')}\n"
+        f"- Fix propuesto: {fix.get('description', 'Ninguno')} en {fix.get('file', '')}\n\n"
+        f"El desarrollador pregunta: {question}\n\n"
+        f"Responde en español, de forma clara y directa. "
+        f"Podés mezclar lenguaje de negocio y técnico según lo que requiera la pregunta. "
+        f"Si la pregunta requiere ver código específico, indicá el archivo y qué buscar."
+    )
+
+    try:
+        provider = _make_provider()
+        answer = provider.simple_complete(
+            messages=[{"role": "user", "content": context}],
+            system=SYSTEM_PROMPT,
+            max_tokens=800,
+        )
+        messenger.send_message(f"💬 {answer[:2000]}")
+    except Exception as e:
+        logger.error("[debugger] handle_question failed: %s", e, exc_info=True)
+        messenger.send_message(f"❌ No pude responder: {e}")
 
 
 def _parse_response(text: str) -> dict | None:

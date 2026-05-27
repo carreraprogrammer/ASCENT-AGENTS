@@ -90,6 +90,13 @@ async def _dispatch(api: RailsHttpAdapter, messenger: TelegramMessenger, parsed)
                 None, debugger_agent.handle_reject, error_id
             )
             return
+        if data.startswith("debug:ask:"):
+            messenger.answer_callback(parsed.callback_query_id, "💬")
+            error_id = int(data.split(":")[-1])
+            asyncio.get_event_loop().run_in_executor(
+                None, debugger_agent.handle_ask, error_id
+            )
+            return
 
     # 1b. Categorización de transacciones (cat / confirm / skip) ──────────────
     if parsed.intent == UserIntent.CATEGORIZATION_CALLBACK:
@@ -120,7 +127,14 @@ async def _dispatch(api: RailsHttpAdapter, messenger: TelegramMessenger, parsed)
         )
         return
 
-    # 4. Texto plano → agente conversacional en tiempo real ───────────────────
+    # 4. Pregunta al debugger si hay sesión activa ────────────────────────────
+    if debugger_agent._ACTIVE_QUESTION_SESSION is not None and parsed.text:
+        asyncio.get_event_loop().run_in_executor(
+            None, debugger_agent.handle_question, parsed.text
+        )
+        return
+
+    # 5. Texto plano → agente conversacional en tiempo real ───────────────────
     logger.info("[webhook] realtime message recibido: %.60r", parsed.text)
     asyncio.get_event_loop().run_in_executor(
         None,

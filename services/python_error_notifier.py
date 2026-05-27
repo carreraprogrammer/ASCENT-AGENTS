@@ -9,6 +9,7 @@ import hashlib
 import logging
 import time
 import traceback
+from datetime import datetime, timezone, timedelta
 from threading import Thread
 
 logger = logging.getLogger(__name__)
@@ -58,6 +59,7 @@ def capture(exc: Exception, context: str = "", params: dict | None = None) -> No
         endpoint=context or "python_agent",
         http_method="INTERNAL",
         params=params or {},
+        occurred_at=datetime.now(timezone(timedelta(hours=-5))).isoformat(),
     )
 
     logger.info(
