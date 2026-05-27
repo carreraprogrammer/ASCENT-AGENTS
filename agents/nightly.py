@@ -33,12 +33,28 @@ MESES_FULL = [
 # HELPERS GMAIL — OAuth vía Gmail REST API (Fase 0.6)
 # ══════════════════════════════════════════════════════════════════════════════
 
-BANK_SENDERS = [
-    "BANCO_DAVIVIENDA@davivienda.com",
-    "notificaciones@nequi.com.co",
-    "somos@nequi.com.co",
-    "notificaciones@davivienda.com",
-]
+# ── Regexes para el modo de descubrimiento automático ────────────────────────
+# Dominio de bancos conocidos en Colombia y LatAm (no exhaustivo — Claude filtra el resto)
+_BANK_DOMAIN_RE = re.compile(
+    r"@(davivienda|nequi|bancolombia|bbva|itau|itaú|falabella|nu\.com|nubank|"
+    r"scotiabank|occidente|bogota|popular|agrario|serfinansa|coltefinanciera|"
+    r"powwi|uala|ualá|lulo|pibank|bold|addi|sistecredito|sistecrédito|"
+    r"daviplata|movii|rappipay|tuya|codensa|colpatria|helm|gnb|sudameris|"
+    r"coomeva|confiar|cootraban|banco\.com)",
+    re.IGNORECASE,
+)
+_FINANCIAL_SUBJECT_RE = re.compile(
+    r"transacci[oó]n|transferencia|d[eé]bito|cr[eé]dito|compra|retiro|"
+    r"consignaci[oó]n|dep[oó]sito|pago|saldo|cargo|abono|notificaci[oó]n|"
+    r"movimiento|aviso|alerta",
+    re.IGNORECASE,
+)
+# Query de Gmail cuando el usuario no tiene remitentes configurados
+_KEYWORD_QUERY = (
+    "(transaccion OR transacción OR transferencia OR débito OR debito "
+    "OR crédito OR credito OR compra OR retiro OR consignacion "
+    "OR depósito OR deposito OR pago OR saldo OR cargo OR abono)"
+)
 
 
 def _decode_base64url(data: str) -> str:
@@ -69,58 +85,120 @@ def _get_header(payload: dict, name: str) -> str:
     return ""
 
 
-def _fetch_gmail_emails_oauth(access_token: str, since_date: str | None = None) -> dict:
-    """
-    Busca correos bancarios usando el Gmail REST API con el access_token OAuth del usuario.
+def _extract_email_address(raw_from: str) -> str:
+    """Extrae el email limpio de un campo From como 'Nombre <email@banco.com>'."""
+    match = re.search(r"<(.+?)>", raw_from)
+    return match.group(1).strip() if match else raw_from.strip()
 
-    Args:
-        access_token: Token de acceso de OAuth2.
-        since_date:   Fecha en formato YYYY/MM/DD. Por defecto: hoy en zona Colombia.
+
+def _fetch_gmail_emails_oauth(
+    access_token: str,
+    bank_senders: list[str] | None = None,
+    since_date: str | None = None,
+) -> dict:
+    """
+    Busca correos financieros usando el Gmail REST API con el access_token OAuth.
+
+    Dos modos:
+    - Con bank_senders: busca solo esos remitentes (preciso, menos tokens).
+    - Sin bank_senders: busca por keywords financieros + filtra por heurística
+      de dominio/asunto. Claude hace el filtrado final de contenido.
+
+    Devuelve además new_senders: remitentes bancarios descubiertos que no
+    estaban en la lista original, para que el agente los guarde automáticamente.
     """
     import httpx
 
     hoy = since_date or datetime.now(COLOMBIA_TZ).date().strftime("%Y/%m/%d")
-    headers = {"Authorization": f"Bearer {access_token}"}
-    emails = []
+    auth_headers = {"Authorization": f"Bearer {access_token}"}
+    configured = set(s.lower() for s in (bank_senders or []))
 
+    # ── 1. Construir query ──────────────────────────────────────────────────
+    if bank_senders:
+        from_parts = " OR ".join(f"from:{s}" for s in bank_senders)
+        query = f"({from_parts}) after:{hoy}"
+    else:
+        query = f"{_KEYWORD_QUERY} after:{hoy}"
+
+    # ── 2. Obtener lista de IDs + metadata (Subject + From) ─────────────────
     try:
-        for remitente in BANK_SENDERS:
-            query = f"from:{remitente} after:{hoy}"
-            resp = httpx.get(
-                "https://gmail.googleapis.com/gmail/v1/users/me/messages",
-                headers=headers,
-                params={"q": query, "maxResults": 20},
-                timeout=15,
-            )
-            if resp.status_code == 401:
-                return {"ok": False, "error": "Token expirado — el usuario debe reconectar Gmail desde la app."}
-            resp.raise_for_status()
-
-            for msg_ref in resp.json().get("messages", []):
-                msg_resp = httpx.get(
-                    f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{msg_ref['id']}",
-                    headers=headers,
-                    params={"format": "full"},
-                    timeout=15,
-                )
-                msg_resp.raise_for_status()
-                msg = msg_resp.json()
-                payload = msg.get("payload", {})
-
-                raw = _extract_gmail_part(payload)
-                raw = re.sub(r"<[^>]+>", " ", raw)
-                raw = re.sub(r"\s+", " ", raw).strip()[:3000]
-
-                if raw:
-                    emails.append({
-                        "from":    remitente,
-                        "subject": _get_header(payload, "Subject"),
-                        "body":    raw,
-                    })
-
-        return {"ok": True, "emails": emails, "total": len(emails)}
+        resp = httpx.get(
+            "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+            headers=auth_headers,
+            params={"q": query, "maxResults": 50},
+            timeout=15,
+        )
+        if resp.status_code == 401:
+            return {"ok": False, "error": "Token expirado — el usuario debe reconectar Gmail desde la app."}
+        resp.raise_for_status()
+        message_refs = resp.json().get("messages", [])
     except Exception as e:
         return {"ok": False, "error": str(e)}
+
+    if not message_refs:
+        return {"ok": True, "emails": [], "total": 0, "new_senders": []}
+
+    # ── 3. Obtener metadata para pre-filtrar (modo keyword) ──────────────────
+    candidates = []
+    for msg_ref in message_refs[:50]:
+        try:
+            meta = httpx.get(
+                f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{msg_ref['id']}",
+                headers=auth_headers,
+                params={"format": "metadata", "metadataHeaders": ["From", "Subject"]},
+                timeout=15,
+            )
+            meta.raise_for_status()
+            payload = meta.json().get("payload", {})
+            from_raw = _get_header(payload, "From")
+            subject  = _get_header(payload, "Subject")
+            from_email = _extract_email_address(from_raw)
+            candidates.append({"id": msg_ref["id"], "from": from_email, "subject": subject})
+        except Exception:
+            continue  # mensaje individual no bloquea el resto
+
+    # En modo keyword, pre-filtrar por heurística antes de pagar el fetch completo
+    if not bank_senders:
+        candidates = [
+            c for c in candidates
+            if _BANK_DOMAIN_RE.search(c["from"])
+            or _FINANCIAL_SUBJECT_RE.search(c["subject"])
+        ]
+
+    # ── 4. Fetch completo solo de los candidatos ─────────────────────────────
+    emails = []
+    new_senders: list[str] = []
+
+    for c in candidates:
+        try:
+            msg_resp = httpx.get(
+                f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{c['id']}",
+                headers=auth_headers,
+                params={"format": "full"},
+                timeout=15,
+            )
+            msg_resp.raise_for_status()
+            payload = msg_resp.json().get("payload", {})
+
+            raw = _extract_gmail_part(payload)
+            raw = re.sub(r"<[^>]+>", " ", raw)
+            raw = re.sub(r"\s+", " ", raw).strip()[:3000]
+
+            if raw:
+                emails.append({"from": c["from"], "subject": c["subject"], "body": raw})
+
+                # Detectar remitentes nuevos (no estaban en la lista configurada)
+                if bank_senders is not None and c["from"].lower() not in configured:
+                    new_senders.append(c["from"])
+        except Exception:
+            continue
+
+    return {
+        "ok":          True,
+        "emails":      emails,
+        "total":       len(emails),
+        "new_senders": list(dict.fromkeys(new_senders)),  # deduplicado, orden preservado
+    }
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -191,7 +269,8 @@ def _normalize_transaction_payload(payload: dict) -> dict:
 
 def build_tool_map(api: RailsApiPort, messenger: MessengerPort,
                    target_date: datetime | None = None,
-                   gmail_token: str | None = None) -> dict:
+                   gmail_token: str | None = None,
+                   bank_senders: list[str] | None = None) -> dict:
     now_col = target_date or datetime.now(COLOMBIA_TZ)
 
     def get_telegram_messages(_input: dict) -> dict:
@@ -240,7 +319,30 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort,
                 "reason": "Esta cuenta no tiene Gmail conectado. Conectar desde la app → Perfil → Gmail.",
             }
         since = now_col.date().strftime("%Y/%m/%d")
-        return _fetch_gmail_emails_oauth(gmail_token, since_date=since)
+        result = _fetch_gmail_emails_oauth(gmail_token, bank_senders=bank_senders, since_date=since)
+        if result.get("ok") and result.get("new_senders"):
+            result["nota_nuevos_remitentes"] = (
+                "Se encontraron correos de remitentes bancarios no registrados. "
+                "Llamá update_email_senders con la lista completa actualizada para guardarlos."
+            )
+        return result
+
+    def update_email_senders(inp: dict) -> dict:
+        """Guarda la lista de remitentes bancarios descubiertos o configurados por el usuario."""
+        import httpx
+        senders = inp.get("senders", [])
+        try:
+            r = httpx.patch(
+                f"{API_BASE_URL}/api/v1/me/email_connection/senders",
+                headers=api.headers(),
+                json={"bank_senders": senders},
+                timeout=15,
+            )
+            r.raise_for_status()
+            saved = r.json().get("data", {}).get("bank_senders", senders)
+            return {"ok": True, "saved_senders": saved}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
 
     def get_transactions(inp: dict) -> dict:
         month = inp.get("month", now_col.month)
@@ -450,6 +552,7 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort,
         "get_completeness":              get_completeness,
         "get_telegram_messages":         get_telegram_messages,
         "get_gmail_emails":              get_gmail_emails,
+        "update_email_senders":          update_email_senders,
         "get_transactions":              get_transactions,
         "get_balance":                   get_balance,
         "get_pending_transactions":      get_pending_transactions,
@@ -506,8 +609,35 @@ TOOLS = [
     },
     {
         "name": "get_gmail_emails",
-        "description": "Busca correos bancarios de HOY (Davivienda, Nequi).",
+        "description": (
+            "Busca correos financieros de HOY en el Gmail del usuario. "
+            "Si el usuario tiene remitentes configurados, busca solo esos (preciso). "
+            "Si no, busca por keywords financieros y filtra por heurística — el resultado "
+            "puede incluir correos de bancos/billeteras que Claude debe interpretar. "
+            "Si la respuesta incluye new_senders, llamá update_email_senders con la lista "
+            "completa (actuales + nuevos) para que se guarden automáticamente."
+        ),
         "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "update_email_senders",
+        "description": (
+            "Guarda la lista de remitentes bancarios de la cuenta. "
+            "Llamar cuando get_gmail_emails devuelva new_senders, pasando la lista completa "
+            "(bank_senders actuales + new_senders descubiertos). "
+            "El usuario puede editar esta lista desde el perfil de la app."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "senders": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Lista completa de emails de remitentes bancarios. Máx 30.",
+                },
+            },
+            "required": ["senders"],
+        },
     },
     {
         "name": "get_transactions",
@@ -1034,12 +1164,18 @@ REGLA ESTRICTA: Solo marcá conflictos genuinos. Si tenés suficiente informaci�
 
 def run_nightly(api: RailsApiPort, messenger: MessengerPort,
                 target_date: datetime | None = None,
-                gmail_token: str | None = None) -> None:
+                gmail_token: str | None = None,
+                bank_senders: list[str] | None = None) -> None:
     now_col = target_date or datetime.now(COLOMBIA_TZ)
     fecha = now_col.strftime("%d/%m/%Y")
     print(f"\n=== Revisión nocturna Brain — {fecha} ===\n")
 
-    tool_map = build_tool_map(api, messenger, target_date=now_col, gmail_token=gmail_token)
+    tool_map = build_tool_map(
+        api, messenger,
+        target_date=now_col,
+        gmail_token=gmail_token,
+        bank_senders=bank_senders,
+    )
 
     provider = build_llm_provider()
     provider.run_agent(

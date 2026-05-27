@@ -88,21 +88,24 @@ async def _run_nightly_all_accounts() -> None:
             api       = RailsHttpAdapter(account_id=account_id)
             messenger = AppMessenger(api, session_id="nightly")
 
-            # Fase 0.6: obtener token Gmail OAuth desde la API.
-            # Si la cuenta no tiene Gmail conectado → None → el agente omite el análisis de correos.
-            gmail_token = None
+            # Fase 0.6: obtener token Gmail OAuth + remitentes configurados.
+            # Si la cuenta no tiene Gmail conectado → None → el agente omite correos.
+            gmail_token   = None
+            bank_senders  = None
             try:
                 token_data = api.get_gmail_token()
                 if token_data:
-                    gmail_token = token_data.get("access_token")
-                    logger.info("[nightly] account_id=%s — Gmail token OK.", account_id)
+                    gmail_token  = token_data.get("access_token")
+                    bank_senders = token_data.get("bank_senders") or None  # [] → None = modo keyword
+                    mode = f"{len(bank_senders)} remitentes" if bank_senders else "keywords automáticos"
+                    logger.info("[nightly] account_id=%s — Gmail OK (%s).", account_id, mode)
                 else:
-                    logger.info("[nightly] account_id=%s — sin Gmail conectado, omitiendo correos.", account_id)
+                    logger.info("[nightly] account_id=%s — sin Gmail, omitiendo correos.", account_id)
             except Exception as gmail_err:
-                logger.warning("[nightly] account_id=%s — no se pudo obtener Gmail token: %s", account_id, gmail_err)
+                logger.warning("[nightly] account_id=%s — Gmail token error: %s", account_id, gmail_err)
 
             from functools import partial
-            task = partial(run_nightly, api, messenger, gmail_token=gmail_token)
+            task = partial(run_nightly, api, messenger, gmail_token=gmail_token, bank_senders=bank_senders)
             await loop.run_in_executor(None, task)
             logger.info("[nightly] account_id=%s — completado OK.", account_id)
 
