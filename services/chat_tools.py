@@ -177,7 +177,11 @@ def build_tools() -> list[dict[str, Any]]:
                         "items": {
                             "type": "object",
                             "properties": {
-                                "date": {"type": "string"},
+                                "date": {
+                                    "type": "string",
+                                    "description": "Fecha en formato DD/MM/YYYY o DD/MM. Ejemplos válidos: '23/05/2026', '23/05'. NUNCA uses palabras como 'hoy', 'ayer' o cualquier lenguaje natural.",
+                                    "pattern": r"^\d{1,2}/\d{1,2}(/\d{4})?$",
+                                },
                                 "concept": {"type": "string"},
                                 "product": {"type": "string"},
                                 "amount": {"type": "integer"},
@@ -206,7 +210,7 @@ def build_tools() -> list[dict[str, Any]]:
             "description": (
                 "Crea una transacción. Para Telegram usa source=telegram. "
                 "No inventes source_event_id: el sistema lo inyecta automáticamente. "
-                "La API espera date en DD/MM/YYYY o DD/MM. "
+                "La API espera date en DD/MM/YYYY o DD/MM. NUNCA uses palabras como 'hoy', 'ayer', 'today'. "
                 "Para ingresos esperados, podés incluir income_source_id; si lo omitís, la API intentará vincularlo por monto, fecha y concepto. "
                 "Para pagos de gastos recurrentes esperados, podés incluir recurring_obligation_id; si lo omitís, la API intentará vincularlo por monto y concepto. "
                 "Para aportes a bolsillos, podés incluir sinking_fund_id; si lo omitís, la API intentará vincularlo por monto y concepto. "
@@ -218,7 +222,11 @@ def build_tools() -> list[dict[str, Any]]:
             "input_schema": {
                 "type": "object",
                 "properties": {
-                    "date": {"type": "string"},
+                    "date": {
+                        "type": "string",
+                        "description": "Fecha en formato DD/MM/YYYY o DD/MM. Ejemplos válidos: '23/05/2026', '23/05'. NUNCA uses palabras como 'hoy', 'ayer' o cualquier lenguaje natural.",
+                        "pattern": r"^\d{1,2}/\d{1,2}(/\d{4})?$",
+                    },
                     "concept": {"type": "string"},
                     "product": {"type": "string"},
                     "amount": {"type": "integer"},
@@ -672,6 +680,19 @@ def _send_telegram(messenger: MessengerPort, payload: dict, state: dict | None =
     return {"ok": True}
 
 
+_DATE_PATTERN = __import__("re").compile(r"^\d{1,2}/\d{1,2}(/\d{4})?$")
+
+
+def _normalize_date(raw: str | None, now_col: datetime) -> str:
+    """Ensure date is DD/MM/YYYY. Falls back to today if the LLM sent natural language."""
+    if raw and _DATE_PATTERN.match(str(raw)):
+        return raw
+    normalized = now_col.strftime("%d/%m/%Y")
+    if raw:
+        logger.warning("[chat_agent] invalid date from LLM raw=%r, normalized to %s", raw, normalized)
+    return normalized
+
+
 def build_tool_map(
     api: RailsApiPort,
     messenger: MessengerPort,
@@ -785,6 +806,7 @@ def build_tool_map(
 
     def _create_transaction(input_data: dict) -> dict:
         payload = _inject_source_event_id(dict(input_data))
+        payload["date"] = _normalize_date(payload.get("date"), now)
         source_event_id = (payload.get("metadata") or {}).get("source_event_id")
 
         logger.info(
@@ -828,7 +850,9 @@ def build_tool_map(
 
         prepared = []
         for txn in transactions:
-            prepared.append(_inject_source_event_id(dict(txn)))
+            t = _inject_source_event_id(dict(txn))
+            t["date"] = _normalize_date(t.get("date"), now)
+            prepared.append(t)
 
         for i, txn in enumerate(prepared):
             logger.info(
