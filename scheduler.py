@@ -13,6 +13,7 @@ import os
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+from apscheduler.events import EVENT_JOB_ERROR
 
 # Cuenta que tiene email conectado vía credenciales globales (hasta Fase 0.6 — Gmail OAuth).
 # Una vez implementado OAuth por cuenta, esto desaparece y has_email viene de la API.
@@ -106,6 +107,11 @@ async def _run_nightly_all_accounts() -> None:
                 account_id, account_name, e,
                 exc_info=True,
             )
+            try:
+                from services.python_error_notifier import capture
+                capture(e, context=f"nightly:account_{account_id}")
+            except Exception as notify_err:
+                logger.error("[nightly] error notifier failed: %s", notify_err)
 
 
 async def _run_insight_refresh_sync() -> None:
@@ -134,6 +140,11 @@ def _run_insight_all_accounts() -> None:
             logger.info("[insight] account_id=%s — OK.", account_id)
         except Exception as e:
             logger.error("[insight] account_id=%s (%s) — error: %s", account_id, account_name, e)
+            try:
+                from services.python_error_notifier import capture
+                capture(e, context=f"insight:account_{account_id}")
+            except Exception as notify_err:
+                logger.error("[insight] error notifier failed: %s", notify_err)
 
 
 async def _ping_rails() -> None:
@@ -148,9 +159,20 @@ async def _ping_rails() -> None:
         logger.warning("[scheduler] keep-alive Rails failed: %s", e)
 
 
+def _on_job_error(event) -> None:
+    if not event.exception:
+        return
+    try:
+        from services.python_error_notifier import capture
+        capture(event.exception, context=f"scheduler:{event.job_id}")
+    except Exception as e:
+        logger.error("[scheduler] error notifier failed: %s", e)
+
+
 def start() -> AsyncIOScheduler:
     global _scheduler
     _scheduler = _make_scheduler()
+    _scheduler.add_listener(_on_job_error, EVENT_JOB_ERROR)
     _scheduler.start()
     logger.info("[scheduler] APScheduler iniciado.")
     return _scheduler
