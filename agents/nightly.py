@@ -11,8 +11,7 @@ Diferencias vs revision_nocturna.py original:
 """
 
 import os
-import imaplib
-import email
+import base64
 import json
 import re
 import calendar
@@ -30,60 +29,95 @@ MESES_FULL = [
     "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre",
 ]
 
-GMAIL_ADDR = os.environ.get("GMAIL_ADDRESS", "")
-GMAIL_PASS = os.environ.get("GMAIL_APP_PASSWORD", "")
-
-
 # ══════════════════════════════════════════════════════════════════════════════
-# HELPERS GMAIL
+# HELPERS GMAIL — OAuth vía Gmail REST API (Fase 0.6)
 # ══════════════════════════════════════════════════════════════════════════════
 
-def _extract_body(msg) -> str:
-    body = ""
-    if msg.is_multipart():
-        for part in msg.walk():
-            if part.get_content_type() in ("text/plain", "text/html"):
-                try:
-                    body += part.get_payload(decode=True).decode("utf-8", errors="ignore")
-                except Exception:
-                    pass
-    else:
-        try:
-            body = msg.get_payload(decode=True).decode("utf-8", errors="ignore")
-        except Exception:
-            pass
-    body = re.sub(r"<[^>]+>", " ", body)
-    body = re.sub(r"\s+", " ", body).strip()
-    return body[:3000]
+BANK_SENDERS = [
+    "BANCO_DAVIVIENDA@davivienda.com",
+    "notificaciones@nequi.com.co",
+    "somos@nequi.com.co",
+    "notificaciones@davivienda.com",
+]
 
 
-def _fetch_gmail_emails(since_date: str | None = None) -> dict:
-    remitentes = [
-        "BANCO_DAVIVIENDA@davivienda.com",
-        "notificaciones@nequi.com.co",
-        "somos@nequi.com.co",
-        "notificaciones@davivienda.com",
-    ]
-    # Use Colombia timezone — nightly runs at 4am UTC = 11pm Colombia (next UTC day)
-    hoy_str = since_date or datetime.now(COLOMBIA_TZ).date().strftime("%d-%b-%Y")
+def _decode_base64url(data: str) -> str:
+    """Decodifica base64url del Gmail API (RFC 4648 §5), añadiendo padding si falta."""
+    padded = data + "=" * (-len(data) % 4)
+    return base64.urlsafe_b64decode(padded).decode("utf-8", errors="ignore")
+
+
+def _extract_gmail_part(part: dict) -> str:
+    """Extrae texto recursivamente de un message part del Gmail API."""
+    mime = part.get("mimeType", "")
+    parts = part.get("parts", [])
+    body_data = part.get("body", {}).get("data", "")
+
+    if parts:
+        return "".join(_extract_gmail_part(p) for p in parts)
+
+    if mime in ("text/plain", "text/html") and body_data:
+        return _decode_base64url(body_data)
+
+    return ""
+
+
+def _get_header(payload: dict, name: str) -> str:
+    for h in payload.get("headers", []):
+        if h.get("name", "").lower() == name.lower():
+            return h.get("value", "")
+    return ""
+
+
+def _fetch_gmail_emails_oauth(access_token: str, since_date: str | None = None) -> dict:
+    """
+    Busca correos bancarios usando el Gmail REST API con el access_token OAuth del usuario.
+
+    Args:
+        access_token: Token de acceso de OAuth2.
+        since_date:   Fecha en formato YYYY/MM/DD. Por defecto: hoy en zona Colombia.
+    """
+    import httpx
+
+    hoy = since_date or datetime.now(COLOMBIA_TZ).date().strftime("%Y/%m/%d")
+    headers = {"Authorization": f"Bearer {access_token}"}
     emails = []
+
     try:
-        mail = imaplib.IMAP4_SSL("imap.gmail.com")
-        mail.login(GMAIL_ADDR, GMAIL_PASS)
-        mail.select("inbox")
-        for remitente in remitentes:
-            _, data = mail.search(None, f'(FROM "{remitente}" SINCE "{hoy_str}")')
-            for uid in data[0].split():
-                _, msg_data = mail.fetch(uid, "(RFC822)")
-                msg = email.message_from_bytes(msg_data[0][1])
-                body = _extract_body(msg)
-                if body:
+        for remitente in BANK_SENDERS:
+            query = f"from:{remitente} after:{hoy}"
+            resp = httpx.get(
+                "https://gmail.googleapis.com/gmail/v1/users/me/messages",
+                headers=headers,
+                params={"q": query, "maxResults": 20},
+                timeout=15,
+            )
+            if resp.status_code == 401:
+                return {"ok": False, "error": "Token expirado — el usuario debe reconectar Gmail desde la app."}
+            resp.raise_for_status()
+
+            for msg_ref in resp.json().get("messages", []):
+                msg_resp = httpx.get(
+                    f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{msg_ref['id']}",
+                    headers=headers,
+                    params={"format": "full"},
+                    timeout=15,
+                )
+                msg_resp.raise_for_status()
+                msg = msg_resp.json()
+                payload = msg.get("payload", {})
+
+                raw = _extract_gmail_part(payload)
+                raw = re.sub(r"<[^>]+>", " ", raw)
+                raw = re.sub(r"\s+", " ", raw).strip()[:3000]
+
+                if raw:
                     emails.append({
-                        "from": remitente,
-                        "subject": str(msg.get("Subject", "")),
-                        "body": body,
+                        "from":    remitente,
+                        "subject": _get_header(payload, "Subject"),
+                        "body":    raw,
                     })
-        mail.logout()
+
         return {"ok": True, "emails": emails, "total": len(emails)}
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -157,7 +191,7 @@ def _normalize_transaction_payload(payload: dict) -> dict:
 
 def build_tool_map(api: RailsApiPort, messenger: MessengerPort,
                    target_date: datetime | None = None,
-                   has_email: bool = True) -> dict:
+                   gmail_token: str | None = None) -> dict:
     now_col = target_date or datetime.now(COLOMBIA_TZ)
 
     def get_telegram_messages(_input: dict) -> dict:
@@ -199,14 +233,14 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort,
             return {"ok": False, "error": str(e)}
 
     def get_gmail_emails(_input: dict) -> dict:
-        if not has_email:
+        if not gmail_token:
             return {
                 "ok": False,
                 "skipped": True,
-                "reason": "Esta cuenta no tiene email conectado. Se omite el análisis de correos.",
+                "reason": "Esta cuenta no tiene Gmail conectado. Conectar desde la app → Perfil → Gmail.",
             }
-        since = now_col.date().strftime("%d-%b-%Y")
-        return _fetch_gmail_emails(since_date=since)
+        since = now_col.date().strftime("%Y/%m/%d")
+        return _fetch_gmail_emails_oauth(gmail_token, since_date=since)
 
     def get_transactions(inp: dict) -> dict:
         month = inp.get("month", now_col.month)
@@ -1000,12 +1034,12 @@ REGLA ESTRICTA: Solo marcá conflictos genuinos. Si tenés suficiente informaci�
 
 def run_nightly(api: RailsApiPort, messenger: MessengerPort,
                 target_date: datetime | None = None,
-                has_email: bool = True) -> None:
+                gmail_token: str | None = None) -> None:
     now_col = target_date or datetime.now(COLOMBIA_TZ)
     fecha = now_col.strftime("%d/%m/%Y")
     print(f"\n=== Revisión nocturna Brain — {fecha} ===\n")
 
-    tool_map = build_tool_map(api, messenger, target_date=now_col, has_email=has_email)
+    tool_map = build_tool_map(api, messenger, target_date=now_col, gmail_token=gmail_token)
 
     provider = build_llm_provider()
     provider.run_agent(

@@ -15,10 +15,8 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.events import EVENT_JOB_ERROR
 
-# Cuenta que tiene email conectado vía credenciales globales (hasta Fase 0.6 — Gmail OAuth).
-# Una vez implementado OAuth por cuenta, esto desaparece y has_email viene de la API.
-_EMAIL_ACCOUNT_ID = os.environ.get("DEFAULT_ACCOUNT_ID", "")
-_GMAIL_CONFIGURED  = bool(os.environ.get("GMAIL_ADDRESS"))
+# Fase 0.6: Gmail OAuth por cuenta — el token viene de GET /api/v1/me/email_connection/token.
+# Las credenciales IMAP globales (GMAIL_ADDRESS / GMAIL_APP_PASSWORD) ya no se usan.
 
 logger = logging.getLogger(__name__)
 
@@ -90,15 +88,22 @@ async def _run_nightly_all_accounts() -> None:
             api       = RailsHttpAdapter(account_id=account_id)
             messenger = AppMessenger(api, session_id="nightly")
 
-            # has_email: True solo para la cuenta configurada con credenciales globales de Gmail.
-            # Fase 0.6 (Gmail OAuth por cuenta) reemplazará esto — cada cuenta tendrá
-            # sus propios tokens y has_email vendrá directamente de la API.
-            has_email = _GMAIL_CONFIGURED and (account_id == _EMAIL_ACCOUNT_ID)
+            # Fase 0.6: obtener token Gmail OAuth desde la API.
+            # Si la cuenta no tiene Gmail conectado → None → el agente omite el análisis de correos.
+            gmail_token = None
+            try:
+                token_data = api.get_gmail_token()
+                if token_data:
+                    gmail_token = token_data.get("access_token")
+                    logger.info("[nightly] account_id=%s — Gmail token OK.", account_id)
+                else:
+                    logger.info("[nightly] account_id=%s — sin Gmail conectado, omitiendo correos.", account_id)
+            except Exception as gmail_err:
+                logger.warning("[nightly] account_id=%s — no se pudo obtener Gmail token: %s", account_id, gmail_err)
 
-            await loop.run_in_executor(
-                None,
-                lambda: run_nightly(api, messenger, has_email=has_email),
-            )
+            from functools import partial
+            task = partial(run_nightly, api, messenger, gmail_token=gmail_token)
+            await loop.run_in_executor(None, task)
             logger.info("[nightly] account_id=%s — completado OK.", account_id)
 
         except Exception as e:
