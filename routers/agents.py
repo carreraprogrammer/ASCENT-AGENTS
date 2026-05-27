@@ -100,7 +100,7 @@ async def web_chat(body: WebChatRequest, background_tasks: BackgroundTasks) -> d
 @router.post("/app_chat", dependencies=[Depends(_verify_service_token)])
 async def app_chat(body: WebChatRequest, background_tasks: BackgroundTasks) -> dict:
     """Canal app → mismo agente conversacional de Telegram, con messenger visual."""
-    api = RailsHttpAdapter()
+    api = RailsHttpAdapter(account_id=str(body.account_id))
     background_tasks.add_task(
         handle_app_chat,
         api=api,
