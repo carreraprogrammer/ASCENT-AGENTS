@@ -39,6 +39,7 @@ async def error_webhook(request: Request) -> Response:
         endpoint=body.get("endpoint", ""),
         http_method=body.get("http_method", ""),
         params=body.get("params", {}),
+        occurred_at=body.get("occurred_at", ""),
     )
 
     logger.info("[errors] received error_id=%s class=%s endpoint=%s",
