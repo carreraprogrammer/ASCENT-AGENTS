@@ -64,4 +64,13 @@ async def root():
 @app.exception_handler(Exception)
 async def global_exception_handler(request, exc):
     logger.error("Unhandled exception: %s", exc, exc_info=True)
+    try:
+        from services.python_error_notifier import capture
+        capture(
+            exc,
+            context=f"{request.method} {request.url.path}",
+            params=dict(request.query_params),
+        )
+    except Exception as notify_err:
+        logger.error("[main] error notifier failed: %s", notify_err)
     return JSONResponse(status_code=500, content={"ok": False, "error": "Internal server error"})
