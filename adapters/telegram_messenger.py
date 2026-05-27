@@ -18,13 +18,23 @@ from ports.messenger import MessengerPort, ParsedUpdate, UserIntent
 
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-CHAT_ID   = int(os.environ.get("TELEGRAM_CHAT_ID", "0"))
-TG_BASE   = f"https://api.telegram.org/bot{BOT_TOKEN}"
-TIMEOUT   = 8
+BOT_TOKEN       = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+DEFAULT_CHAT_ID = int(os.environ.get("TELEGRAM_CHAT_ID", "0"))
+TG_BASE         = f"https://api.telegram.org/bot{BOT_TOKEN}"
+TIMEOUT         = 8
 
 
 class TelegramMessenger(MessengerPort):
+    """
+    Messenger para Telegram. Cada instancia apunta a un chat_id específico.
+
+    Uso:
+        messenger = TelegramMessenger(chat_id=123456789)   # cuenta de usuario externo
+        messenger = TelegramMessenger()                    # usa TELEGRAM_CHAT_ID del env (Daniel)
+    """
+
+    def __init__(self, chat_id: int | None = None) -> None:
+        self._chat_id = chat_id if chat_id is not None else DEFAULT_CHAT_ID
 
     # ── Parsing ────────────────────────────────────────────────────────────────
 
@@ -104,7 +114,7 @@ class TelegramMessenger(MessengerPort):
 
     def send_message(self, text: str, parse_mode: str = "HTML") -> None:
         self._post("sendMessage", {
-            "chat_id":    CHAT_ID,
+            "chat_id":    self._chat_id,
             "text":       text,
             "parse_mode": parse_mode,
         })
@@ -122,7 +132,7 @@ class TelegramMessenger(MessengerPort):
             ]
         }
         self._post("sendMessage", {
-            "chat_id":      CHAT_ID,
+            "chat_id":      self._chat_id,
             "text":         text,
             "parse_mode":   parse_mode,
             "reply_markup": keyboard,

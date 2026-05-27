@@ -15,35 +15,54 @@ logger = logging.getLogger(__name__)
 BASE_URL = os.environ.get("DANIEL15K_API_URL", "https://daniel15k-api-production.up.railway.app")
 API_TOKEN = os.environ.get("DANIEL15K_API_TOKEN", "")
 SERVICE_TOKEN = os.environ.get("DANIEL15K_SERVICE_TOKEN", "")
-ACCOUNT_ID = os.environ.get("DANIEL15K_ACCOUNT_ID", "")
+DEFAULT_ACCOUNT_ID = os.environ.get("DANIEL15K_ACCOUNT_ID", "")
 AGENT_TYPE = os.environ.get("DANIEL15K_AGENT_TYPE", "finance_coach")
 TIMEOUT = 15
 
 
-def build_auth_headers() -> dict:
-    if SERVICE_TOKEN and ACCOUNT_ID:
+def build_auth_headers(account_id: str | None = None) -> dict:
+    """Construye headers de autenticación. Acepta account_id explícito o cae al env."""
+    aid = account_id or DEFAULT_ACCOUNT_ID
+    if SERVICE_TOKEN and aid:
         return {
             "Authorization": f"Bearer {SERVICE_TOKEN}",
-            "X-Account-Id": str(ACCOUNT_ID),
+            "X-Account-Id": str(aid),
             "X-Agent-Type": AGENT_TYPE,
             "Content-Type": "application/json",
         }
-
     return {
         "Authorization": f"Bearer {API_TOKEN}",
         "Content-Type": "application/json",
     }
 
 
-def _headers() -> dict:
-    return build_auth_headers()
+def build_service_headers() -> dict:
+    """Headers de service account sin X-Account-Id — para endpoints admin del agente."""
+    return {
+        "Authorization": f"Bearer {SERVICE_TOKEN}",
+        "Content-Type": "application/json",
+    }
 
 
 class RailsHttpAdapter(RailsApiPort):
+    """
+    Adaptador HTTP hacia Rails. Cada instancia opera sobre una account específica.
+
+    Uso:
+        api = RailsHttpAdapter(account_id="42")   # para el usuario 42
+        api = RailsHttpAdapter()                  # usa DANIEL15K_ACCOUNT_ID del env
+    """
+
+    def __init__(self, account_id: str | None = None) -> None:
+        self._account_id = str(account_id) if account_id else DEFAULT_ACCOUNT_ID
+
+    def headers(self) -> dict:
+        """Headers de autenticación escopados a esta cuenta."""
+        return build_auth_headers(self._account_id)
 
     def _get(self, path: str, params: dict | None = None) -> dict | list:
         url = f"{BASE_URL}{path}"
-        resp = httpx.get(url, headers=_headers(), params=params, timeout=TIMEOUT)
+        resp = httpx.get(url, headers=self.headers(), params=params, timeout=TIMEOUT)
         resp.raise_for_status()
         return resp.json()
 
@@ -53,17 +72,29 @@ class RailsHttpAdapter(RailsApiPort):
         if isinstance(body, dict) and "metadata" in body and body["metadata"] is not None:
             payload = {**body, "metadata": dict(body["metadata"])}
 
-        resp = httpx.post(url, headers=_headers(), json=payload, timeout=TIMEOUT)
+        resp = httpx.post(url, headers=self.headers(), json=payload, timeout=TIMEOUT)
         resp.raise_for_status()
         data = resp.json()
         return data.get("data", data) if isinstance(data, dict) and "data" in data else data
 
     def _patch(self, path: str, body: dict) -> dict:
         url = f"{BASE_URL}{path}"
-        resp = httpx.patch(url, headers=_headers(), json=body, timeout=TIMEOUT)
+        resp = httpx.patch(url, headers=self.headers(), json=body, timeout=TIMEOUT)
         resp.raise_for_status()
         data = resp.json()
         return data.get("data", data) if isinstance(data, dict) and "data" in data else data
+
+    # --- agent admin ---
+
+    def get_active_accounts(self) -> list[dict]:
+        """
+        Devuelve todas las accounts activas. Usa service headers sin X-Account-Id.
+        Solo llamar desde el scheduler — no está escopado a una cuenta específica.
+        """
+        url = f"{BASE_URL}/api/v1/agent/accounts/active"
+        resp = httpx.get(url, headers=build_service_headers(), timeout=TIMEOUT)
+        resp.raise_for_status()
+        return resp.json().get("data", [])
 
     # --- summary ---
 
