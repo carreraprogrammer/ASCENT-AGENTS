@@ -9,9 +9,15 @@ Horarios en UTC (Colombia = UTC-5):
 
 import logging
 import asyncio
+import os
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
+
+# Cuenta que tiene email conectado vía credenciales globales (hasta Fase 0.6 — Gmail OAuth).
+# Una vez implementado OAuth por cuenta, esto desaparece y has_email viene de la API.
+_EMAIL_ACCOUNT_ID = os.environ.get("DEFAULT_ACCOUNT_ID", "")
+_GMAIL_CONFIGURED  = bool(os.environ.get("GMAIL_ADDRESS"))
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +64,6 @@ async def _run_nightly_all_accounts() -> None:
     """
     from adapters.rails_http import RailsHttpAdapter
     from adapters.app_messenger import AppMessenger
-    from adapters.telegram_messenger import TelegramMessenger
     from agents.nightly import run_nightly
 
     # Usamos el adaptador por defecto (sin account_id) para obtener la lista de cuentas.
@@ -76,24 +81,18 @@ async def _run_nightly_all_accounts() -> None:
     loop = asyncio.get_event_loop()
 
     for account in accounts:
-        account_id       = str(account["id"])
-        account_name     = account.get("name", f"account_{account_id}")
-        telegram_chat_id = account.get("telegram_chat_id")
+        account_id   = str(account["id"])
+        account_name = account.get("name", f"account_{account_id}")
 
         logger.info("[nightly] account_id=%s (%s) — iniciando.", account_id, account_name)
         try:
-            api = RailsHttpAdapter(account_id=account_id)
+            api       = RailsHttpAdapter(account_id=account_id)
+            messenger = AppMessenger(api, session_id="nightly")
 
-            if telegram_chat_id:
-                messenger = TelegramMessenger(chat_id=int(telegram_chat_id))
-            else:
-                # Cuenta sin Telegram → entrega el análisis vía app (agent_ui_events)
-                messenger = AppMessenger(api, session_id="nightly")
-
-            # has_email=False hasta que Fase 0.6 implemente Gmail OAuth por cuenta.
-            # La cuenta de Daniel usa GMAIL_ADDRESS/GMAIL_APP_PASSWORD del env;
-            # las demás cuentas omiten el análisis de email silenciosamente.
-            has_email = bool(telegram_chat_id)  # proxy temporal: solo Daniel tiene Telegram + email
+            # has_email: True solo para la cuenta configurada con credenciales globales de Gmail.
+            # Fase 0.6 (Gmail OAuth por cuenta) reemplazará esto — cada cuenta tendrá
+            # sus propios tokens y has_email vendrá directamente de la API.
+            has_email = _GMAIL_CONFIGURED and (account_id == _EMAIL_ACCOUNT_ID)
 
             await loop.run_in_executor(
                 None,
