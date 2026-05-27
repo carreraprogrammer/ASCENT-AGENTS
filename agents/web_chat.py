@@ -5,7 +5,9 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 
-from adapters.rails_http import RailsHttpAdapter
+import httpx
+
+from adapters.rails_http import BASE_URL, RailsHttpAdapter
 from ports.messenger import NullMessenger
 from services.chat_context import COLOMBIA_TZ
 from services.chat_prompts import WEB_SYSTEM_PROMPT
@@ -17,20 +19,73 @@ logger = logging.getLogger(__name__)
 # Herramientas que no tienen sentido en el canal web
 _WEB_EXCLUDED_TOOLS = {"send_telegram"}
 
+LEVEL_NAMES = {
+    0: "Huevo",
+    1: "Pulso",
+    2: "Conciencia",
+    3: "Estructura",
+    4: "Estrategia",
+    5: "Sistema Nervioso",
+}
+
 
 def _web_tools() -> list[dict]:
     return [t for t in build_tools() if t["name"] not in _WEB_EXCLUDED_TOOLS]
+
+
+def _fetch_preflight(api: RailsHttpAdapter, month: int, year: int) -> dict | None:
+    """Llama a /agents/preflight y devuelve el resultado, o None si falla."""
+    try:
+        r = httpx.post(
+            f"{BASE_URL}/api/v1/agents/preflight",
+            headers=api.headers(),
+            json={"month": month, "year": year, "intent": "general"},
+            timeout=10,
+        )
+        r.raise_for_status()
+        return r.json().get("data")
+    except Exception as exc:
+        logger.warning("[web_chat] preflight failed (non-blocking): %s", exc)
+        return None
+
+
+def _build_level_block(progress: dict) -> str:
+    """Construye el bloque de nivel para inyectar en el mensaje inicial."""
+    level         = progress.get("level", 0)
+    readiness     = progress.get("readiness_score", 0)
+    streak        = progress.get("streak_days", 0)
+    bypass        = progress.get("bypass_readiness", False)
+    level_name    = LEVEL_NAMES.get(level, f"Nivel {level}")
+
+    lines = [
+        "=== PERFIL DEL USUARIO ===",
+        f"Nivel: {level} — {level_name}",
+        f"Readiness score: {readiness}/100",
+        f"Racha activa: {streak} días",
+    ]
+    if bypass:
+        lines.append("(bypass_readiness: true — usuario de prueba, sin restricciones por nivel)")
+    lines.append(
+        "Ajustá el tono y profundidad de tus respuestas según el nivel: "
+        "0-1 → simple y directo, sin jerga; 2-3 → más profundidad; 4-5 → peer-to-peer."
+    )
+    lines.append("===")
+    return "\n".join(lines)
 
 
 def _build_initial_message(
     message: str | None,
     event_response: dict | None,
     budget_context: dict | None = None,
+    level_block: str | None = None,
 ) -> str:
     parts = [
         "El usuario está interactuando desde la aplicación web.",
         "Respondé usando herramientas visuales (emit_ui_event, navigate_to). No uses send_telegram.",
     ]
+
+    if level_block:
+        parts.append(f"\n{level_block}")
 
     if budget_context:
         parts.append(f"\n=== CONTEXTO FINANCIERO PRE-CARGADO ===\n{budget_context}\n===")
@@ -72,14 +127,26 @@ def handle_web_chat(
         logger.warning("[web_chat] session %s: no message nor event_response — skipping", session_id)
         return
 
-    api = RailsHttpAdapter()
+    # Adaptador con el account_id correcto — aislamiento por cuenta
+    api = RailsHttpAdapter(account_id=str(account_id))
     messenger = NullMessenger()
     now_col = datetime.now(COLOMBIA_TZ)
     state = {"responded": False, "mutated": False, "source_event_id": None, "session_id": session_id}
 
     tool_map = build_tool_map(api, messenger, now_col, state)
 
-    initial_message = _build_initial_message(message, event_response, budget_context)
+    # Preflight: obtener nivel + readiness para inyectar en el contexto del agente
+    level_block: str | None = None
+    preflight = _fetch_preflight(api, now_col.month, now_col.year)
+    if preflight and (progress := preflight.get("user_progress")):
+        level_block = _build_level_block(progress)
+        logger.info(
+            "[web_chat] session %s account %s — level=%s readiness=%s",
+            session_id, account_id,
+            progress.get("level"), progress.get("readiness_score"),
+        )
+
+    initial_message = _build_initial_message(message, event_response, budget_context, level_block)
 
     try:
         provider = build_llm_provider()
