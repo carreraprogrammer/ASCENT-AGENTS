@@ -316,6 +316,23 @@ class RailsHttpAdapter(RailsApiPort):
         result = self._post(f"/api/v1/sinking_funds/{sinking_fund_id}/withdraw", body)
         return result.get("data", result) if isinstance(result, dict) else result
 
+    # --- gmail oauth ---
+
+    def get_gmail_token(self) -> dict | None:
+        """
+        GET /api/v1/me/email_connection/token
+        Devuelve {"access_token": "...", "provider": "gmail"} si la cuenta tiene Gmail conectado.
+        Devuelve None si no hay conexión (404).
+        Requiere service account con agent:write scope.
+        """
+        try:
+            data = self._get("/api/v1/me/email_connection/token")
+            return data.get("data") or None
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return None
+            raise
+
     # --- agent ui events ---
 
     def create_agent_ui_event(self, event_type: str, payload: dict, session_id: str | None = None) -> dict:
