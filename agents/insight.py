@@ -20,7 +20,7 @@ from datetime import datetime, timezone, timedelta
 
 import httpx
 
-from adapters.rails_http import BASE_URL, build_auth_headers
+from adapters.rails_http import BASE_URL, build_auth_headers, RailsHttpAdapter
 from services.llm_factory import build_llm_provider
 
 logger = logging.getLogger(__name__)
@@ -93,10 +93,10 @@ def _extract_current_state(summary: dict, milestones: list[dict]) -> dict:
 
 # ── API helpers ───────────────────────────────────────────────────────────────
 
-def _get_summary(month: int, year: int) -> dict:
+def _get_summary(month: int, year: int, headers_fn=build_auth_headers) -> dict:
     r = httpx.get(
         f"{BASE_URL}/api/v1/summary",
-        headers=build_auth_headers(),
+        headers=headers_fn(),
         params={"month": month, "year": year},
         timeout=20,
     )
@@ -104,11 +104,11 @@ def _get_summary(month: int, year: int) -> dict:
     return r.json()
 
 
-def _get_milestones(limit: int = 5) -> list[dict]:
+def _get_milestones(limit: int = 5, headers_fn=build_auth_headers) -> list[dict]:
     try:
         r = httpx.get(
             f"{BASE_URL}/api/v1/milestones",
-            headers=build_auth_headers(),
+            headers=headers_fn(),
             timeout=15,
         )
         r.raise_for_status()
@@ -120,20 +120,20 @@ def _get_milestones(limit: int = 5) -> list[dict]:
         return []
 
 
-def _get_latest_insight() -> dict | None:
+def _get_latest_insight(headers_fn=build_auth_headers) -> dict | None:
     r = httpx.get(
         f"{BASE_URL}/api/v1/agent_insights/latest",
-        headers=build_auth_headers(),
+        headers=headers_fn(),
         timeout=15,
     )
     r.raise_for_status()
     return r.json().get("data")
 
 
-def _post_night_analysis(payload: dict) -> dict:
+def _post_night_analysis(payload: dict, headers_fn=build_auth_headers) -> dict:
     r = httpx.post(
         f"{BASE_URL}/api/v1/night_analyses",
-        headers=build_auth_headers(),
+        headers=headers_fn(),
         json=payload,
         timeout=20,
     )
@@ -307,15 +307,25 @@ Generá la tarjeta de coaching:
 
 # ── Main entry point ──────────────────────────────────────────────────────────
 
-def run_insight_refresh(*, trigger: str = "scheduled") -> None:
+def run_insight_refresh(*, trigger: str = "scheduled", api: "RailsHttpAdapter | None" = None) -> None:
+    """
+    Genera o refresca el insight diario.
+
+    Args:
+        trigger: "scheduled" | "on_demand" | "manual"
+        api: instancia de RailsHttpAdapter con el account_id correcto.
+             Si es None, usa build_auth_headers() con el account del env (Daniel).
+    """
+    headers_fn = api.headers if api is not None else build_auth_headers
+
     now_col = datetime.now(COLOMBIA_TZ)
     month, year = now_col.month, now_col.year
 
     logger.info("[insight] starting — %s/%s trigger=%s", month, year, trigger)
 
-    summary      = _get_summary(month, year)
-    last_insight = _get_latest_insight()
-    milestones   = _get_milestones()
+    summary      = _get_summary(month, year, headers_fn=headers_fn)
+    last_insight = _get_latest_insight(headers_fn=headers_fn)
+    milestones   = _get_milestones(headers_fn=headers_fn)
     current      = _extract_current_state(summary, milestones)
 
     should, reason = _should_refresh(current, last_insight, now_col)
@@ -360,5 +370,5 @@ def run_insight_refresh(*, trigger: str = "scheduled") -> None:
         },
     }
 
-    _post_night_analysis(payload)
+    _post_night_analysis(payload, headers_fn=headers_fn)
     logger.info("[insight] analysis persisted — trigger=%s commitment_gap=%s", reason, commitment_gap)

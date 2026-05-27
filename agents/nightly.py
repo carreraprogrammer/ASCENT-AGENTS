@@ -156,7 +156,8 @@ def _normalize_transaction_payload(payload: dict) -> dict:
 
 
 def build_tool_map(api: RailsApiPort, messenger: MessengerPort,
-                   target_date: datetime | None = None) -> dict:
+                   target_date: datetime | None = None,
+                   has_email: bool = True) -> dict:
     now_col = target_date or datetime.now(COLOMBIA_TZ)
 
     def get_telegram_messages(_input: dict) -> dict:
@@ -198,6 +199,12 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort,
             return {"ok": False, "error": str(e)}
 
     def get_gmail_emails(_input: dict) -> dict:
+        if not has_email:
+            return {
+                "ok": False,
+                "skipped": True,
+                "reason": "Esta cuenta no tiene email conectado. Se omite el análisis de correos.",
+            }
         since = now_col.date().strftime("%d-%b-%Y")
         return _fetch_gmail_emails(since_date=since)
 
@@ -245,7 +252,7 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort,
             import httpx
             r = httpx.get(
                 f"{API_BASE_URL}/api/v1/completeness",
-                headers=build_auth_headers(),
+                headers=api.headers(),
                 params={"month": now_col.month, "year": now_col.year},
                 timeout=15,
             )
@@ -260,7 +267,7 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort,
             payload = _normalize_transaction_payload(inp)
             r = httpx.post(
                 f"{API_BASE_URL}/api/v1/transactions",
-                headers=build_auth_headers(),
+                headers=api.headers(),
                 json=payload, timeout=15,
             )
             if r.status_code == 201:
@@ -296,7 +303,7 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort,
         try:
             r = httpx.post(
                 f"{API_BASE_URL}/api/v1/transactions/settle_credit_card",
-                headers=build_auth_headers(),
+                headers=api.headers(),
                 json={"amount": amount},
                 timeout=15,
             )
@@ -318,8 +325,10 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort,
 
     def send_poll(inp: dict) -> dict:
         import httpx
-        chat_id = int(os.environ.get("TELEGRAM_CHAT_ID", "0"))
-        bot_token = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+        from adapters.telegram_messenger import DEFAULT_CHAT_ID, BOT_TOKEN as TG_BOT_TOKEN
+        # Usa el chat_id del messenger si está disponible (TelegramMessenger), si no el env
+        chat_id = getattr(messenger, "_chat_id", DEFAULT_CHAT_ID)
+        bot_token = TG_BOT_TOKEN
         try:
             r = httpx.post(
                 f"https://api.telegram.org/bot{bot_token}/sendPoll",
@@ -338,7 +347,7 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort,
         try:
             r = httpx.get(
                 f"{API_BASE_URL}/api/v1/debts",
-                headers=build_auth_headers(),
+                headers=api.headers(),
                 timeout=15,
             )
             r.raise_for_status()
@@ -378,7 +387,7 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort,
         try:
             r = httpx.get(
                 f"{API_BASE_URL}/api/v1/night_analyses/metrics",
-                headers=build_auth_headers(),
+                headers=api.headers(),
                 params={"date": today},
                 timeout=20,
             )
@@ -393,7 +402,7 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort,
         try:
             r = httpx.post(
                 f"{API_BASE_URL}/api/v1/night_analyses",
-                headers=build_auth_headers(),
+                headers=api.headers(),
                 json=inp,
                 timeout=30,
             )
@@ -990,12 +999,13 @@ REGLA ESTRICTA: Solo marcá conflictos genuinos. Si tenés suficiente informaci�
 
 
 def run_nightly(api: RailsApiPort, messenger: MessengerPort,
-                target_date: datetime | None = None) -> None:
+                target_date: datetime | None = None,
+                has_email: bool = True) -> None:
     now_col = target_date or datetime.now(COLOMBIA_TZ)
     fecha = now_col.strftime("%d/%m/%Y")
     print(f"\n=== Revisión nocturna Brain — {fecha} ===\n")
 
-    tool_map = build_tool_map(api, messenger, target_date=now_col)
+    tool_map = build_tool_map(api, messenger, target_date=now_col, has_email=has_email)
 
     provider = build_llm_provider()
     provider.run_agent(
