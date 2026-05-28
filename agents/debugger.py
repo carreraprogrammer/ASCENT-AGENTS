@@ -252,15 +252,12 @@ def handle(payload: DebugPayload) -> None:
             buttons = [[
                 {"text": "🚀 Hotfix a main", "callback_data": f"debug:hotfix:{payload.error_id}"},
                 {"text": "🔍 Abrir PR",      "callback_data": f"debug:pr:{payload.error_id}"},
-            ], [
-                {"text": "💬 Preguntar",     "callback_data": f"debug:ask:{payload.error_id}"},
                 {"text": "🚫 Ignorar",       "callback_data": f"debug:reject:{payload.error_id}"},
             ]]
         else:
             fix_block = "\n\n<i>No hay fix automático — requiere revisión manual.</i>"
             buttons = [[
-                {"text": "💬 Preguntar", "callback_data": f"debug:ask:{payload.error_id}"},
-                {"text": "🚫 Ignorar",   "callback_data": f"debug:reject:{payload.error_id}"},
+                {"text": "🚫 Ignorar", "callback_data": f"debug:reject:{payload.error_id}"},
             ]]
 
         messenger.send_with_buttons(
@@ -356,19 +353,6 @@ def handle_reject(error_id: int) -> None:
     TelegramMessenger().send_message(f"🚫 Error #{error_id} ignorado.")
 
 
-def handle_ask(error_id: int) -> None:
-    global _ACTIVE_QUESTION_SESSION
-    pending = PENDING_FIXES.get(error_id)
-    if not pending:
-        TelegramMessenger().send_message("⚠️ Este error ya no está en memoria.")
-        return
-    _ACTIVE_QUESTION_SESSION = error_id
-    TelegramMessenger().send_message(
-        f"💬 <b>Preguntale al agente sobre el error #{error_id}</b>\n\n"
-        f"Escribí tu pregunta directamente. El agente tiene todo el contexto del análisis.\n\n"
-        f"<i>Cuando termines, usá los botones del mensaje anterior para tomar acción.</i>"
-    )
-
 
 def handle_question(question: str) -> None:
     """Responde una pregunta sobre el error activo usando el contexto del análisis previo."""
@@ -413,7 +397,7 @@ def handle_question(question: str) -> None:
     except Exception as e:
         logger.error("[debugger] handle_question failed: %s", e, exc_info=True)
         _ACTIVE_QUESTION_SESSION = None
-        messenger.send_message(f"❌ No pude responder: {e}\n\n<i>Sesión de preguntas cerrada — podés usar los botones del error para continuar.</i>")
+        messenger.send_message(f"❌ No pude responder: {e}")
 
 
 def _parse_response(text: str) -> dict | None:

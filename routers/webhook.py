@@ -90,13 +90,7 @@ async def _dispatch(api: RailsHttpAdapter, messenger: TelegramMessenger, parsed)
                 None, debugger_agent.handle_reject, error_id
             )
             return
-        if data.startswith("debug:ask:"):
-            messenger.answer_callback(parsed.callback_query_id, "💬")
-            error_id = int(data.split(":")[-1])
-            asyncio.get_event_loop().run_in_executor(
-                None, debugger_agent.handle_ask, error_id
-            )
-            return
+
 
     # 1b. Categorización de transacciones (cat / confirm / skip) ──────────────
     if parsed.intent == UserIntent.CATEGORIZATION_CALLBACK:
