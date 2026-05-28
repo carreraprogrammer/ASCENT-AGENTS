@@ -166,10 +166,12 @@ class OpenAICompatibleLlmProvider(LlmProviderPort):
             full_messages.append({"role": "system", "content": system})
         full_messages.extend(messages)
 
+        # GPT-5.x requires max_completion_tokens; older models and DeepSeek accept both.
+        tokens_key = "max_completion_tokens" if self._provider_name == "openai" else "max_tokens"
         payload: dict = {
             "model": model or self._default_model,
             "messages": full_messages,
-            "max_tokens": max_tokens,
+            tokens_key: max_tokens,
         }
         if self._provider_name != "kimi":
             payload["temperature"] = 0.2

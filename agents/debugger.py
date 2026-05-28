@@ -412,7 +412,8 @@ def handle_question(question: str) -> None:
         messenger.send_message(f"💬 {answer[:2000]}")
     except Exception as e:
         logger.error("[debugger] handle_question failed: %s", e, exc_info=True)
-        messenger.send_message(f"❌ No pude responder: {e}")
+        _ACTIVE_QUESTION_SESSION = None
+        messenger.send_message(f"❌ No pude responder: {e}\n\n<i>Sesión de preguntas cerrada — podés usar los botones del error para continuar.</i>")
 
 
 def _parse_response(text: str) -> dict | None:
