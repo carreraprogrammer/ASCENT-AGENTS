@@ -180,7 +180,6 @@ def build_tools() -> list[dict[str, Any]]:
                                 "date": {
                                     "type": "string",
                                     "description": "Fecha en formato DD/MM/YYYY o DD/MM. Ejemplos válidos: '23/05/2026', '23/05'. NUNCA uses palabras como 'hoy', 'ayer' o cualquier lenguaje natural.",
-                                    "pattern": r"^\d{1,2}/\d{1,2}(/\d{4})?$",
                                 },
                                 "concept": {"type": "string"},
                                 "product": {"type": "string"},
@@ -225,7 +224,6 @@ def build_tools() -> list[dict[str, Any]]:
                     "date": {
                         "type": "string",
                         "description": "Fecha en formato DD/MM/YYYY o DD/MM. Ejemplos válidos: '23/05/2026', '23/05'. NUNCA uses palabras como 'hoy', 'ayer' o cualquier lenguaje natural.",
-                        "pattern": r"^\d{1,2}/\d{1,2}(/\d{4})?$",
                     },
                     "concept": {"type": "string"},
                     "product": {"type": "string"},
