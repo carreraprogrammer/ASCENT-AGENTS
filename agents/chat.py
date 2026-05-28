@@ -183,6 +183,15 @@ def _apply_preflight(
     return initial_message
 
 
+def _make_counted_tool_map(raw_map: dict, counter: list) -> dict:
+    def _wrap(fn):
+        def wrapper(args):
+            counter[0] += 1
+            return fn(args)
+        return wrapper
+    return {name: _wrap(fn) for name, fn in raw_map.items()}
+
+
 def _run_conversation(
     api: RailsApiPort,
     messenger: MessengerPort,
@@ -199,10 +208,13 @@ def _run_conversation(
         "last_response": None,
     }
     provider = build_llm_provider()
+    counter = [0]
+    tool_map = _make_counted_tool_map(build_tool_map(api, messenger, now_col, state), counter)
+
     final_text = provider.run_agent(
         system_prompt=SYSTEM_PROMPT,
         tools=build_tools(),
-        tool_map=build_tool_map(api, messenger, now_col, state),
+        tool_map=tool_map,
         initial_message=initial_message,
         max_iterations=12,
         model=resolve_llm_model(),
@@ -211,6 +223,39 @@ def _run_conversation(
 
     if state["responded"]:
         return state["last_response"]
+
+    if final_text and counter[0] == 0:
+        logger.warning("[chat_agent] text without any tool calls — retrying once")
+        state2 = {
+            "responded": False,
+            "mutated": False,
+            "source_event_id": source_event_id,
+            "last_response": None,
+        }
+        counter2 = [0]
+        tool_map2 = _make_counted_tool_map(build_tool_map(api, messenger, now_col, state2), counter2)
+        provider.run_agent(
+            system_prompt=SYSTEM_PROMPT,
+            tools=build_tools(),
+            tool_map=tool_map2,
+            initial_message=(
+                initial_message +
+                "\n\nIMPORTANTE: En tu intento anterior respondiste con texto sin usar ninguna herramienta. "
+                "Debés usar las herramientas: si es un gasto o ingreso, registralo con create_transaction. "
+                "Si respondés al usuario en Telegram, usá send_telegram."
+            ),
+            max_iterations=8,
+            model=resolve_llm_model(),
+            prior_messages=prior_messages,
+        )
+        if state2["responded"]:
+            return state2["last_response"]
+        if state2["mutated"]:
+            messenger.send_message("✅ Listo.")
+            return None
+        logger.error("[chat_agent] retry also skipped tool calls")
+        messenger.send_message("⚠️ No pude procesar eso. Intentá de nuevo o verificá en la app.")
+        return None
 
     if final_text:
         logger.warning("[chat_agent] provider returned direct text without send_telegram tool")
