@@ -323,7 +323,10 @@ def handle_app_message(
     if not text:
         return
 
+    now_col = datetime.now(COLOMBIA_TZ)
     initial_message = (
+        f"Fecha actual en Colombia: {now_col.strftime('%d/%m/%Y')}\n"
+        f"Hora actual en Colombia: {now_col.strftime('%H:%M')}\n"
         "Mensaje nuevo del usuario desde la app. "
         "Interpretalo y actuá en tiempo real usando las herramientas disponibles. "
         "Si es un gasto o ingreso claro, registralo. "
