@@ -701,6 +701,12 @@ def build_tool_map(
     today = now.date()
     state = state or {"responded": False, "mutated": False, "source_event_id": None, "transaction_index": 0}
 
+    def _notify() -> None:
+        try:
+            messenger.notify_data_changed()
+        except Exception as exc:
+            logger.debug("[chat_agent] notify_data_changed skipped: %s", exc)
+
     def _patch(path: str, body: dict) -> dict:
         response = httpx.patch(
             f"{API_URL}{path}",
@@ -710,7 +716,7 @@ def build_tool_map(
         )
         response.raise_for_status()
         state["mutated"] = True
-        messenger.notify_data_changed()
+        _notify()
         return response.json().get("data", {})
 
     def _delete(path: str) -> dict:
@@ -721,7 +727,7 @@ def build_tool_map(
         )
         response.raise_for_status()
         state["mutated"] = True
-        messenger.notify_data_changed()
+        _notify()
         return {"ok": True}
 
     def _post(path: str, body: dict) -> dict:
@@ -733,7 +739,7 @@ def build_tool_map(
         )
         response.raise_for_status()
         state["mutated"] = True
-        messenger.notify_data_changed()
+        _notify()
         return response.json().get("data", {})
 
     def _normalize_categories() -> list[dict]:
@@ -871,7 +877,7 @@ def build_tool_map(
         )
         response.raise_for_status()
         state["mutated"] = True
-        messenger.notify_data_changed()
+        _notify()
         result = response.json()
 
         created = result.get("data", [])

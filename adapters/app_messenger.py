@@ -77,4 +77,4 @@ class AppMessenger(MessengerPort):
         return None
 
     def notify_data_changed(self) -> None:
-        self.api.create_agent_ui_event("data_changed", {}, session_id=self.session_id)
+        self.api.create_agent_ui_event("data_changed", {"v": 1}, session_id=self.session_id)
