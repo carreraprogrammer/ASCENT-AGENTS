@@ -46,14 +46,11 @@ _BANK_DOMAIN_RE = re.compile(
 _FINANCIAL_SUBJECT_RE = re.compile(
     r"transacci[oó]n|transferencia|d[eé]bito|cr[eé]dito|compra|retiro|"
     r"consignaci[oó]n|dep[oó]sito|pago|saldo|cargo|abono|notificaci[oó]n|"
-    r"movimiento|aviso|alerta",
+    r"movimiento|aviso|alerta|factura|cobro|recibo|extracto|resumen|"
+    r"purchase|payment|charge|debit|credit|receipt|invoice|statement|"
+    r"tu\s+compra|tu\s+transacci|tu\s+pago|tu\s+retiro|"
+    r"realizaste|aprobad[oa]|declinad[oa]|rechazad[oa]",
     re.IGNORECASE,
-)
-# Query de Gmail cuando el usuario no tiene remitentes configurados
-_KEYWORD_QUERY = (
-    "(transaccion OR transacción OR transferencia OR débito OR debito "
-    "OR crédito OR credito OR compra OR retiro OR consignacion "
-    "OR depósito OR deposito OR pago OR saldo OR cargo OR abono)"
 )
 
 
@@ -118,7 +115,10 @@ def _fetch_gmail_emails_oauth(
         from_parts = " OR ".join(f"from:{s}" for s in bank_senders)
         query = f"({from_parts}) after:{hoy}"
     else:
-        query = f"{_KEYWORD_QUERY} after:{hoy}"
+        # Sin remitentes configurados: traer todos los correos del período y
+        # dejar que la heurística de subject/dominio filtre los financieros.
+        # NO usar keywords en la query — el banco puede usar cualquier asunto.
+        query = f"after:{hoy}"
 
     # ── 2. Obtener lista de IDs + metadata (Subject + From) ─────────────────
     try:
