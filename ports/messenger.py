@@ -44,6 +44,9 @@ class NullMessenger:
     def answer_callback(self, callback_query_id: str, text: str, show_alert: bool = False) -> None:
         pass
 
+    def notify_data_changed(self) -> None:
+        pass
+
 
 class MessengerPort(ABC):
 
