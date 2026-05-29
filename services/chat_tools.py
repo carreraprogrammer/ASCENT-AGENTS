@@ -710,6 +710,7 @@ def build_tool_map(
         )
         response.raise_for_status()
         state["mutated"] = True
+        messenger.notify_data_changed()
         return response.json().get("data", {})
 
     def _delete(path: str) -> dict:
@@ -720,6 +721,7 @@ def build_tool_map(
         )
         response.raise_for_status()
         state["mutated"] = True
+        messenger.notify_data_changed()
         return {"ok": True}
 
     def _post(path: str, body: dict) -> dict:
@@ -731,6 +733,7 @@ def build_tool_map(
         )
         response.raise_for_status()
         state["mutated"] = True
+        messenger.notify_data_changed()
         return response.json().get("data", {})
 
     def _normalize_categories() -> list[dict]:
@@ -868,6 +871,7 @@ def build_tool_map(
         )
         response.raise_for_status()
         state["mutated"] = True
+        messenger.notify_data_changed()
         result = response.json()
 
         created = result.get("data", [])

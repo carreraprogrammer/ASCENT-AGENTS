@@ -83,3 +83,6 @@ class MessengerPort(ABC):
     ) -> None:
         """Responde a un callback_query (quita el spinner del botón)."""
         ...
+
+    def notify_data_changed(self) -> None:
+        """Notifica al canal que los datos cambiaron (para que el UI se recargue). No-op por defecto."""
