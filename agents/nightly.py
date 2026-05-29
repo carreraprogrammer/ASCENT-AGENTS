@@ -185,7 +185,7 @@ def _fetch_gmail_emails_oauth(
             raw = re.sub(r"\s+", " ", raw).strip()[:3000]
 
             if raw:
-                emails.append({"from": c["from"], "subject": c["subject"], "body": raw})
+                emails.append({"id": c["id"], "from": c["from"], "subject": c["subject"], "body": raw})
 
                 # Detectar remitentes nuevos (no estaban en la lista configurada)
                 if bank_senders is not None and c["from"].lower() not in configured:
@@ -676,7 +676,8 @@ TOOLS = [
         "description": (
             "Registra una transacción nueva. "
             "Si devuelve already_existed=true (HTTP 409), la transacción YA EXISTE — no volver a intentar, no es un error. "
-            "La dedup la maneja la API: mismo date+amount+product+tipo = rechazado para fuentes telegram/gmail. "
+            "Para transacciones de Gmail: SIEMPRE incluí metadata.source_event_id = id del correo Gmail (campo 'id' de cada email). "
+            "La API rechaza con 409 cualquier transacción con el mismo source_event_id — esto previene duplicados en recovery runs. "
             "Incluí payment_source cuando el correo indique el medio de pago: credit_card para compras con tarjeta de crédito, "
             "debit para débito/Nequi/transferencia/cuenta de ahorros, cash para efectivo. "
             "Para ingresos esperados, podés pasar income_source_id; si no, la API intentará vincularlos automáticamente. "
@@ -695,7 +696,7 @@ TOOLS = [
 	                "payment_source":   {"type": "string", "enum": ["credit_card", "debit", "cash"]},
 	                "income_source_id": {"type": "integer"},
 	                "recurring_obligation_id": {"type": "integer"},
-	                "metadata":         {"type": "object"},
+	                "metadata":         {"type": "object", "description": "Para Gmail: OBLIGATORIO incluir source_event_id con el id del correo. Ej: {source_event_id: id_gmail}. Previene duplicados si el ciclo se repite."},
 	                "subcategory_code": {
                     "type": "string",
                     "enum": [
@@ -986,10 +987,13 @@ Abonos/pagos al banco (email dice "Abono TC", "Pago TC", "Pago tarjeta", "se han
 Cuotas de deuda diferida en TC (celular a cuotas, etc.): registrar con payment_source="debit" — es plata saliendo de la cuenta de ahorros para servir una deuda ya capturada como Debt + recurring_obligation.
 
 ═══ DEDUPLICACIÓN ═══
-1. Telegram + Gmail mismo gasto → registrar UNA sola vez
-2. Duplicado = misma fecha + mismo monto (±2%) + mismo producto
-3. Dos montos iguales mismo día DISTINTO producto → son distintos, registrar ambos
-4. Verifica contra get_transactions antes de registrar
+1. Para transacciones de Gmail: SIEMPRE pasá metadata.source_event_id = email["id"] (el ID del correo).
+   La API rechaza automáticamente (409) cualquier source_event_id ya registrado — esto previene duplicados
+   si el ciclo nocturno corre varias veces sobre el mismo período.
+2. Telegram + Gmail mismo gasto → registrar UNA sola vez
+3. Duplicado adicional = misma fecha + mismo monto (±2%) + mismo producto
+4. Dos montos iguales mismo día DISTINTO producto → son distintos, registrar ambos
+5. Verifica contra get_transactions antes de registrar
 
 ═══ TELEGRAM EN TIEMPO REAL ═══
 Los mensajes de Telegram se procesan en tiempo real por el chat agent (desde 15-Apr-2026).
