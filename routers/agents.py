@@ -47,6 +47,7 @@ class WebChatRequest(BaseModel):
     event_response: dict | None = None
     budget_context: dict | None = None
     prior_messages: list[dict] | None = None
+    skip_history: bool = False
 
 
 @router.post("/nightly")
@@ -108,6 +109,7 @@ async def app_chat(body: WebChatRequest, background_tasks: BackgroundTasks) -> d
         message=body.message,
         event_response=body.event_response,
         prior_messages=body.prior_messages,
+        skip_history=body.skip_history,
     )
     return {"ok": True, "session_id": body.session_id}
 

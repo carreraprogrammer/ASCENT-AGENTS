@@ -36,6 +36,7 @@ def handle_app_chat(
     message: str | None = None,
     event_response: dict | None = None,
     prior_messages: list[dict] | None = None,
+    skip_history: bool = False,
 ) -> None:
     messenger = AppMessenger(api, session_id)
 
@@ -52,7 +53,7 @@ def handle_app_chat(
                 callback_data=data,
                 raw={"source": "app", "session_id": session_id},
             )
-            chat_agent.handle_app_message(api, messenger, parsed, prior_messages=prior_messages)
+            chat_agent.handle_app_message(api, messenger, parsed, prior_messages=prior_messages, skip_history=skip_history)
             return
 
         callback_handler.handle(api, messenger, data)
@@ -68,4 +69,4 @@ def handle_app_chat(
         text=text,
         raw={"source": "app", "session_id": session_id},
     )
-    chat_agent.handle_app_message(api, messenger, parsed, prior_messages=prior_messages)
+    chat_agent.handle_app_message(api, messenger, parsed, prior_messages=prior_messages, skip_history=skip_history)

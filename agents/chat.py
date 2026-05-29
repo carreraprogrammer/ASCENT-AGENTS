@@ -317,6 +317,7 @@ def handle_app_message(
     messenger: MessengerPort,
     parsed: ParsedUpdate,
     prior_messages: list[dict] | None = None,
+    skip_history: bool = False,
 ) -> None:
     """Entry point for the in-app chat channel. Uses DB-backed prior_messages instead of the in-memory store."""
     text = (parsed.text or "").strip()
@@ -350,7 +351,7 @@ def handle_app_message(
             source_event_id=event_source_id(parsed),
             prior_messages=prior_messages or None,
         )
-        if response:
+        if response and not skip_history:
             api.create_chat_message(role="assistant", content=response, channel="app")
     except Exception as exc:
         logger.error("[chat_agent] app_chat error: %s", exc, exc_info=True)
