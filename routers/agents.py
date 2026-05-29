@@ -63,15 +63,40 @@ async def trigger_nightly(background_tasks: BackgroundTasks) -> dict:
 async def trigger_nightly_recovery(background_tasks: BackgroundTasks, date: str) -> dict:
     """Dispara la revisión nocturna para una fecha pasada (formato: YYYY-MM-DD)."""
     from adapters.app_messenger import AppMessenger
+    from functools import partial
     try:
         target = datetime.strptime(date, "%Y-%m-%d").replace(
             tzinfo=COLOMBIA_TZ, hour=23, minute=0
         )
     except ValueError:
         return {"ok": False, "error": "Formato de fecha inválido. Usar YYYY-MM-DD."}
-    api = RailsHttpAdapter()
-    background_tasks.add_task(run_nightly, api, AppMessenger(api, session_id="nightly"), target)
-    return {"ok": True, "message": f"Revisión nocturna de {date} iniciada en background."}
+
+    admin_api = RailsHttpAdapter()
+    try:
+        accounts = admin_api.get_active_accounts()
+    except Exception as e:
+        logger.error("[recovery] No se pudo obtener cuentas: %s", e)
+        return {"ok": False, "error": "No se pudo obtener la lista de cuentas."}
+
+    for account in accounts:
+        account_id = str(account["id"])
+        api = RailsHttpAdapter(account_id=account_id)
+        messenger = AppMessenger(api, session_id="nightly")
+
+        gmail_token = None
+        bank_senders = None
+        try:
+            token_data = api.get_gmail_token()
+            if token_data:
+                gmail_token = token_data.get("access_token")
+                bank_senders = token_data.get("bank_senders") or None
+        except Exception as gmail_err:
+            logger.warning("[recovery] account_id=%s — Gmail token error: %s", account_id, gmail_err)
+
+        task = partial(run_nightly, api, messenger, target, gmail_token=gmail_token, bank_senders=bank_senders)
+        background_tasks.add_task(task)
+
+    return {"ok": True, "message": f"Revisión nocturna de {date} iniciada para {len(accounts)} cuenta(s)."}
 
 
 @router.post("/planning")
