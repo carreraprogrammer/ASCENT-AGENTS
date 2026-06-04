@@ -69,16 +69,55 @@ FRAMEWORK: dict[str, dict] = {
             "no tiene efectivo → emergencia va a la tarjeta → vuelve al mismo nivel de deuda → repite."
         ),
         "secuencia_correcta": [
-            "Paso 1 — Starter fund: 1 mes de gastos bare-bones (~$3-4M COP para ingreso de $8.5M). "
+            "Paso 1 — Starter fund: 1 mes de gastos bare-bones (TODOS los compromisos fijos "
+            "incluyendo mínimos de deuda — en Colombia no pagarlos reporta a DataCrédito). "
             "Prioritario sobre deuda acelerada. Rompe el ciclo de deuda recurrente.",
             "Paso 2 — Atacar deuda agresivamente con todo el surplus.",
             "Paso 3 — Completar fondo a 3-6 meses bare-bones DESPUÉS de controlar la deuda. "
             "Con la deuda reducida, el cashflow liberado hace este paso mucho más rápido.",
         ],
+        "regla_de_uso": {
+            "descripcion": (
+                "El fondo de emergencia SOLO se usa si los TRES criterios se cumplen simultáneamente. "
+                "Si falta uno solo, no es emergencia."
+            ),
+            "criterios": {
+                "inesperado": "No podías haberlo previsto ni ahorrado para ello con anticipación.",
+                "necesario": "No actuar tiene consecuencias serias: perder el empleo, daño a la salud, "
+                             "daño a propiedad esencial para trabajar o vivir.",
+                "urgente": "No puede esperar al próximo ingreso. La urgencia es real, no emocional.",
+            },
+            "si_aplica": [
+                "Pérdida de empleo o reducción severa de ingreso.",
+                "Emergencia médica no cubierta por seguro.",
+                "Falla de equipo esencial para generar ingreso (laptop, herramienta de trabajo).",
+                "Daño estructural a la vivienda que la hace inhabitable.",
+            ],
+            "no_aplica": [
+                "Oportunidades de compra (descuentos, gadgets, viajes).",
+                "Gastos estacionales predecibles (SOAT, impuestos, navidad) → van a sinking funds.",
+                "Reparaciones de mantenimiento esperadas → van a sinking funds.",
+                "Cualquier cosa que puede esperar al próximo ingreso.",
+                "Gastos sociales o de entretenimiento, por urgentes que se sientan.",
+            ],
+            "distincion_clave": (
+                "Si podés PREVERLO → sinking fund. Si NO podés preverlo → fondo de emergencia. "
+                "Son instrumentos distintos con propósitos distintos. "
+                "Usar el fondo de emergencia para gastos previsibles destruye su función."
+            ),
+            "coaching_cuando_el_usuario_quiere_usarlo": (
+                "Antes de validar el uso, hacer las tres preguntas en orden: "
+                "1. '¿Podías haber sabido que esto iba a llegar?' "
+                "2. '¿Qué pasa si no lo pagás hoy?' "
+                "3. '¿Podés cubrirlo con el próximo ingreso sin consecuencias graves?' "
+                "Si la respuesta a alguna lleva a 'no es emergencia', redirigir a otras opciones "
+                "(cashflow del mes, sinking fund existente, o aceptar que es un gasto no planeado)."
+            ),
+        },
         "bare_bones": (
-            "Bare-bones = recurring_obligations que NO son pagos de deuda. "
-            "Es lo que el usuario necesita para sobrevivir en una emergencia real "
-            "(arriendo, servicios, comida básica, transporte esencial). "
+            "Bare-bones = TODAS las obligaciones recurrentes activas, incluyendo mínimos de deuda. "
+            "En Colombia, no pagar mínimos de crédito reporta a DataCrédito y genera mora — "
+            "son un costo de supervivencia tan real como el arriendo. "
             "El gasto discrecional se detiene en emergencia — no hay que financiarlo. "
             "Si gastos totales = $5M/mes pero bare-bones = $3.5M, el fondo objetivo es "
             "$3.5M × 3 = $10.5M, no $5M × 3 = $15M."
