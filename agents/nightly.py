@@ -35,22 +35,28 @@ MESES_FULL = [
 # ══════════════════════════════════════════════════════════════════════════════
 
 # ── Regexes para el modo de descubrimiento automático ────────────────────────
-# Dominio de bancos conocidos en Colombia y LatAm (no exhaustivo — Claude filtra el resto)
+# Nombres de bancos/fintechs en Colombia y LatAm.
+# Se buscan como substring en el campo "from" (dirección completa) para capturar
+# subdominios como alertas@notificaciones.bancolombia.com.co
 _BANK_DOMAIN_RE = re.compile(
-    r"@(davivienda|nequi|bancolombia|bbva|itau|itaú|falabella|nu\.com|nubank|"
+    r"(davivienda|nequi|bancolombia|bbva|itau|itaú|falabella|nubank|"
     r"scotiabank|occidente|bogota|popular|agrario|serfinansa|coltefinanciera|"
-    r"powwi|uala|ualá|lulo|pibank|bold|addi|sistecredito|sistecrédito|"
+    r"powwi|uala|ualá|lulo|pibank|bold\.co|addi|sistecredito|sistecrédito|"
     r"daviplata|movii|rappipay|tuya|codensa|colpatria|helm|gnb|sudameris|"
-    r"coomeva|confiar|cootraban|banco\.com)",
+    r"coomeva|confiar|cootraban|mercadopago|payu|pagos\.payu|efecty|"
+    r"rappi|wompi|placetopay|kushki|evertec|credibanco|redeban|"
+    r"nu\.com\.co|nu\.com|@banco\.)",
     re.IGNORECASE,
 )
 _FINANCIAL_SUBJECT_RE = re.compile(
     r"transacci[oó]n|transferencia|d[eé]bito|cr[eé]dito|compra|retiro|"
     r"consignaci[oó]n|dep[oó]sito|pago|saldo|cargo|abono|notificaci[oó]n|"
     r"movimiento|aviso|alerta|factura|cobro|recibo|extracto|resumen|"
+    r"comprobante|confirmaci[oó]n|recaudos|cuota|servicio|vigencia|"
     r"purchase|payment|charge|debit|credit|receipt|invoice|statement|"
     r"tu\s+compra|tu\s+transacci|tu\s+pago|tu\s+retiro|"
-    r"realizaste|aprobad[oa]|declinad[oa]|rechazad[oa]",
+    r"realizaste|aprobad[oa]|declinad[oa]|rechazad[oa]|"
+    r"se\s+ha\s+realizado|se\s+carg[oó]|te\s+cobramos|fu[eé]\s+procesad[oa]",
     re.IGNORECASE,
 )
 
@@ -93,6 +99,7 @@ def _fetch_gmail_emails_oauth(
     access_token: str,
     bank_senders: list[str] | None = None,
     since_date: str | None = None,
+    until_date: str | None = None,
 ) -> dict:
     """
     Busca correos financieros usando el Gmail REST API con el access_token OAuth.
@@ -121,12 +128,16 @@ def _fetch_gmail_emails_oauth(
         # NO usar keywords en la query — el banco puede usar cualquier asunto.
         query = f"after:{hoy}"
 
+    # Acotar el límite superior para no mezclar emails de días siguientes
+    if until_date:
+        query += f" before:{until_date}"
+
     # ── 2. Obtener lista de IDs + metadata (Subject + From) ─────────────────
     try:
         resp = httpx.get(
             "https://gmail.googleapis.com/gmail/v1/users/me/messages",
             headers=auth_headers,
-            params={"q": query, "maxResults": 50},
+            params={"q": query, "maxResults": 100},
             timeout=15,
         )
         if resp.status_code == 401:
@@ -160,11 +171,14 @@ def _fetch_gmail_emails_oauth(
 
     # En modo keyword, pre-filtrar por heurística antes de pagar el fetch completo
     if not bank_senders:
-        candidates = [
+        filtered = [
             c for c in candidates
             if _BANK_DOMAIN_RE.search(c["from"])
             or _FINANCIAL_SUBJECT_RE.search(c["subject"])
         ]
+        # Si la heurística es demasiado restrictiva (pocos candidatos) o la lista
+        # es pequeña, pasarlos todos — el LLM filtra mejor que el regex.
+        candidates = filtered if len(filtered) >= 5 else candidates
 
     # ── 4. Fetch completo solo de los candidatos ─────────────────────────────
     emails = []
@@ -320,7 +334,11 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort,
                 "reason": "Esta cuenta no tiene Gmail conectado. Conectar desde la app → Perfil → Gmail.",
             }
         since = now_col.date().strftime("%Y/%m/%d")
-        result = _fetch_gmail_emails_oauth(gmail_token, bank_senders=bank_senders, since_date=since)
+        # Acotar al día siguiente para no mezclar emails de días futuros (crítico en recovery runs)
+        until = (now_col.date() + timedelta(days=1)).strftime("%Y/%m/%d")
+        result = _fetch_gmail_emails_oauth(
+            gmail_token, bank_senders=bank_senders, since_date=since, until_date=until
+        )
         if result.get("ok") and result.get("new_senders"):
             result["nota_nuevos_remitentes"] = (
                 "Se encontraron correos de remitentes bancarios no registrados. "
