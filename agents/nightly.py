@@ -21,6 +21,7 @@ from ports.rails_api import RailsApiPort
 from ports.messenger import MessengerPort
 from adapters.rails_http import BASE_URL as API_BASE_URL, build_auth_headers
 from services.llm_factory import build_llm_provider, resolve_llm_model
+from services.coaching_framework import get_topic, available_topics
 
 COLOMBIA_TZ = timezone(timedelta(hours=-5))
 MESES = ["ENE", "FEB", "MAR", "ABR", "MAY", "JUN", "JUL", "AGO", "SEP", "OCT", "NOV", "DIC"]
@@ -516,6 +517,27 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort,
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def get_coaching_framework(inp: dict) -> dict:
+        """Consulta el marco metodológico de coaching para razonar sobre situaciones complejas."""
+        topic = inp.get("topic", "")
+        result = get_topic(topic)
+        return {"ok": "error" not in result, **result}
+
+    def get_health_metrics(_input: dict) -> dict:
+        """Ratios de salud financiera estructural: ratio_fijos, DTI, fondo emergencia, tasa ahorro, AoM."""
+        import httpx
+        try:
+            r = httpx.get(
+                f"{API_BASE_URL}/api/v1/health_metrics",
+                headers=api.headers(),
+                params={"month": now_col.month, "year": now_col.year},
+                timeout=15,
+            )
+            r.raise_for_status()
+            return {"ok": True, **r.json().get("data", {})}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def get_night_metrics(_input: dict) -> dict:
         """Pre-contextualiza los datos del día: clasifica transacciones como matched/unmatched."""
         import httpx
@@ -548,6 +570,8 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort,
             return {"ok": False, "error": str(e)}
 
     return {
+        "get_coaching_framework":        get_coaching_framework,
+        "get_health_metrics":            get_health_metrics,
         "get_night_metrics":             get_night_metrics,
         "get_completeness":              get_completeness,
         "get_telegram_messages":         get_telegram_messages,
@@ -570,6 +594,51 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort,
 # ── Herramientas para Claude ──────────────────────────────────────────────────
 
 TOOLS = [
+    {
+        "name": "get_coaching_framework",
+        "description": (
+            "Consulta el marco metodológico de coaching financiero cuando necesitás razonar profundo "
+            "sobre una situación específica. Llamalo cuando: detectás que ratio_fijos es crítico o DTI "
+            "está en zona de estrés, el usuario pregunta sobre estrategia de deuda o priorización de metas, "
+            "hay señales de vergüenza/evitación financiera, querés adaptar el coaching a la fase del usuario, "
+            "o necesitás los umbrales exactos de salud financiera. "
+            "NO llamarlo para cosas operacionales (registrar transacciones, consultar balance)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "topic": {
+                    "type": "string",
+                    "enum": available_topics(),
+                    "description": (
+                        "Tema del framework a consultar. "
+                        "categorias_agencia: por qué las categorías importan y el diagnóstico estructural. "
+                        "fondo_emergencia: secuencia correcta, bare-bones, umbrales. "
+                        "deuda_estrategia: snowball vs avalanche, cuándo usar cada uno. "
+                        "ratios_salud: todos los umbrales y fórmulas. "
+                        "fases_financieras: coaching y surplus por fase. "
+                        "conducta_financiera: ciclo de vergüenza, MI, qué cambia conducta. "
+                        "presupuesto_discrecional: tasas por fase, anti-patrones. "
+                        "pagos_anticipados: detección y ajuste de balance. "
+                        "overflow_excedente: guardarrails y reglas por fase."
+                    ),
+                }
+            },
+            "required": ["topic"],
+        },
+    },
+    {
+        "name": "get_health_metrics",
+        "description": (
+            "Ratios de salud financiera estructural calculados por la API: "
+            "ratio_gastos_fijos (% del ingreso comprometido en obligaciones), "
+            "emergency_fund (meses de cobertura bare-bones y gaps a 1/3/6 meses), "
+            "dti (deuda/ingreso), tasa_ahorro y age_of_money. "
+            "Llamarlo cuando necesitás diagnosticar la salud estructural del usuario, "
+            "no solo el estado del mes actual. Complementa get_summary con diagnóstico de largo plazo."
+        ),
+        "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
     {
         "name": "get_night_metrics",
         "description": (
@@ -1142,10 +1211,39 @@ CARRY-OVER: Las transacciones pending de días anteriores siguen apareciendo en 
 
 REGLA ESTRICTA: Solo marcá conflictos genuinos. Si tenés suficiente información → resolvé directamente.
 
+═══ MARCO DE SALUD FINANCIERA (reflejos — siempre activos) ═══
+Las categorías miden AGENCIA, no tipo contable:
+  committed  → sin elección real. Si ratio > 70% ingreso base = problema ESTRUCTURAL, no disciplina.
+  necessary  → inevitable pero optimizable.
+  discretionary → única gaveta con libertad real de corte. Aquí vive el coaching de mayor impacto.
+  investment → retorno futuro medible. No es lujo.
+  social     → gasto relacional válido. Familismo latinoamericano es variable real, no evitable.
+
+Umbrales (usar para diagnosticar, no para regañar):
+  ratio_fijos ≤50% excelente | 51-65% saludable | 66-75% alerta | >75% crítico (problema estructural)
+  DTI ≤20% seguro | 21-35% advertencia | >35% estrés
+  fondo_emergencia: 0m urgencia | 0.5-1m starter | 1-3m construyendo | ≥3m suficiente
+  tasa_ahorro <5% insuficiente | 5-10% básico | ≥15% saludable
+  age_of_money <14d paycheck-to-paycheck | ≥30d independiente del ciclo
+
+Prioridad por fase:
+  Sin starter fund (0-1 mes): surplus → fondo. No mencionar inversión.
+  Con starter + deuda: atacar deuda según estrategia del usuario (snowball o avalanche).
+  Post-deuda: fondo completo 3-6m → invertir.
+
+Conducta — tres reglas que no cambian:
+  1. Normalizar antes de analizar. Nunca "deberías haber". El pasado no es accionable.
+  2. Si el usuario repite el mismo error → el plan no es realista, no el usuario.
+  3. El plan ejecutable siempre gana al plan matemáticamente óptimo.
+
+Para razonamiento profundo sobre cualquiera de estos temas → get_coaching_framework(topic=...).
+Para diagnóstico estructural con números reales → get_health_metrics().
+
 ═══ FLUJO RECOMENDADO ═══
 1. get_night_metrics → pre-contextualizar: saber qué transacciones son ESPERADAS antes de procesar Gmail
 2. get_completeness → detectar gaps de contexto
-3. get_summary → alertas de presupuesto + estado plan quincenal + overflow si aplica
+3. get_health_metrics → diagnóstico estructural: ratio_fijos, DTI, fondo emergencia, AoM (llamar si health_status no es comfortable o si querés coaching de largo plazo)
+4. get_summary → alertas de presupuesto + estado plan quincenal + overflow si aplica
 4. get_telegram_messages → transacciones ya registradas hoy desde el chat (source=telegram)
 5. get_gmail_emails → cargos bancarios del día
 6. Cruzar Gmail vs Telegram: si coinciden monto+producto → mismo gasto, NO duplicar
