@@ -697,6 +697,8 @@ TOOLS = [
 	                "income_source_id": {"type": "integer"},
 	                "recurring_obligation_id": {"type": "integer"},
 	                "metadata":         {"type": "object", "description": "Para Gmail: OBLIGATORIO incluir source_event_id con el id del correo. Ej: {source_event_id: id_gmail}. Previene duplicados si el ciclo se repite."},
+                "covers_period_month": {"type": "integer", "description": "Mes que cubre este pago si es anticipado (ej: arriendo pagado en mayo para junio → 6)."},
+                "covers_period_year":  {"type": "integer", "description": "Año que cubre este pago si es anticipado (ej: 2026)."},
 	                "subcategory_code": {
                     "type": "string",
                     "enum": [
