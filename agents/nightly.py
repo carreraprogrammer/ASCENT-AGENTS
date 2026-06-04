@@ -1088,6 +1088,23 @@ Condiciones a revisar:
 
 No llames create_milestone por condiciones que no se verificaron con datos reales de la API.
 
+═══ RECONCILIACIÓN DE PAGOS ANTICIPADOS ═══
+Antes de evaluar el balance del mes o reportar un déficit, verifica si hay pagos que cubren períodos futuros y distorsionan el análisis del mes actual.
+
+SEÑALES de pago anticipado a detectar:
+- La misma obligación recurrente aparece DOS veces en el mes (ej: "arriendo" el día 5 Y el día 28)
+- El concepto menciona el mes siguiente explícitamente (ej: "Arriendo junio", "Transferencia Davivienda - Arriendo", fechas al final del mes)
+- Una cuota de crédito tiene "(pago anticipado)" en el concepto
+- Hay un pago de committed en los últimos 3-5 días del mes que duplica un pago del inicio del mes
+
+PROCEDIMIENTO si detectás un pago anticipado:
+1. Calculá el balance ajustado: balance_real_mes = balance_reportado + monto_pago_anticipado
+2. Calculá el saldo efectivo del mes siguiente: saldo_efectivo_siguiente = balance_actual + monto_pago_anticipado (porque ese compromiso ya está cubierto)
+3. Mencionalo en el resumen con claridad: "El balance incluye el [concepto] de [mes siguiente] pagado por adelantado ($X). Sin ese pago, el mes cierra en $Y."
+4. Usa el balance_ajustado para la lectura conductual, NO el balance bruto
+
+REGLA: si el balance muestra un déficit > 20% del ingreso mensual base, SIEMPRE revisá las transacciones committed del mes antes de reportarlo como crisis. Los déficits reales existen, pero muchos son pagos anticipados mal interpretados.
+
 ═══ TRANSACCIONES ESPERADAS (NO alarmar) ═══
 get_night_metrics devuelve transactions_context.matched: gastos del día que YA tienen recurring_obligation_id (arriendo, crédito, seguro, etc.).
 - Son ESPERADOS — el usuario los programó previamente. No mencionarlos como alertas en Telegram.
