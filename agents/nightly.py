@@ -34,30 +34,15 @@ MESES_FULL = [
 # HELPERS GMAIL — OAuth vía Gmail REST API (Fase 0.6)
 # ══════════════════════════════════════════════════════════════════════════════
 
-# ── Regexes para el modo de descubrimiento automático ────────────────────────
-# Nombres de bancos/fintechs en Colombia y LatAm.
-# Se buscan como substring en el campo "from" (dirección completa) para capturar
-# subdominios como alertas@notificaciones.bancolombia.com.co
-_BANK_DOMAIN_RE = re.compile(
-    r"(davivienda|nequi|bancolombia|bbva|itau|itaú|falabella|nubank|"
-    r"scotiabank|occidente|bogota|popular|agrario|serfinansa|coltefinanciera|"
-    r"powwi|uala|ualá|lulo|pibank|bold\.co|addi|sistecredito|sistecrédito|"
-    r"daviplata|movii|rappipay|tuya|codensa|colpatria|helm|gnb|sudameris|"
-    r"coomeva|confiar|cootraban|mercadopago|payu|pagos\.payu|efecty|"
-    r"rappi|wompi|placetopay|kushki|evertec|credibanco|redeban|"
-    r"nu\.com\.co|nu\.com|@banco\.)",
-    re.IGNORECASE,
-)
-_FINANCIAL_SUBJECT_RE = re.compile(
-    r"transacci[oó]n|transferencia|d[eé]bito|cr[eé]dito|compra|retiro|"
-    r"consignaci[oó]n|dep[oó]sito|pago|saldo|cargo|abono|notificaci[oó]n|"
-    r"movimiento|aviso|alerta|factura|cobro|recibo|extracto|resumen|"
-    r"comprobante|confirmaci[oó]n|recaudos|cuota|servicio|vigencia|"
-    r"purchase|payment|charge|debit|credit|receipt|invoice|statement|"
-    r"tu\s+compra|tu\s+transacci|tu\s+pago|tu\s+retiro|"
-    r"realizaste|aprobad[oa]|declinad[oa]|rechazad[oa]|"
-    r"se\s+ha\s+realizado|se\s+carg[oó]|te\s+cobramos|fu[eé]\s+procesad[oa]",
-    re.IGNORECASE,
+# ── Query universal para Gmail (modo sin senders configurados) ────────────────
+# Gmail busca en asunto + cuerpo, así que no necesitamos regex de dominios.
+# Funciona en cualquier país, idioma o banco — el LLM hace el filtrado final.
+_GMAIL_FINANCIAL_QUERY = (
+    "pago OR compra OR débito OR crédito OR transferencia OR transacción "
+    "OR factura OR cobro OR abono OR cargo OR saldo OR movimiento OR retiro "
+    "OR consignación OR depósito OR recibo OR extracto OR cuota "
+    "OR payment OR charge OR purchase OR debit OR credit OR transfer "
+    "OR invoice OR receipt OR transaction OR statement OR refund"
 )
 
 
@@ -105,12 +90,13 @@ def _fetch_gmail_emails_oauth(
     Busca correos financieros usando el Gmail REST API con el access_token OAuth.
 
     Dos modos:
-    - Con bank_senders: busca solo esos remitentes (preciso, menos tokens).
-    - Sin bank_senders: busca por keywords financieros + filtra por heurística
-      de dominio/asunto. Claude hace el filtrado final de contenido.
+    - Con bank_senders: query exacta por remitente (preciso, mínimo tokens).
+    - Sin bank_senders: query con keywords financieros universales en Gmail.
+      Gmail busca en asunto + cuerpo → no se necesita heurística local.
+      El LLM hace el filtrado final de contenido.
 
-    Devuelve además new_senders: remitentes bancarios descubiertos que no
-    estaban en la lista original, para que el agente los guarde automáticamente.
+    Devuelve además new_senders: remitentes encontrados que no estaban
+    configurados, para que el agente los guarde automáticamente.
     """
     import httpx
 
@@ -123,21 +109,20 @@ def _fetch_gmail_emails_oauth(
         from_parts = " OR ".join(f"from:{s}" for s in bank_senders)
         query = f"({from_parts}) after:{hoy}"
     else:
-        # Sin remitentes configurados: traer todos los correos del período y
-        # dejar que la heurística de subject/dominio filtre los financieros.
-        # NO usar keywords en la query — el banco puede usar cualquier asunto.
-        query = f"after:{hoy}"
+        # Gmail filtra por keywords en cuerpo+asunto — sin regex de dominios locales.
+        # Funciona en cualquier país, moneda o banco.
+        query = f"({_GMAIL_FINANCIAL_QUERY}) after:{hoy}"
 
     # Acotar el límite superior para no mezclar emails de días siguientes
     if until_date:
         query += f" before:{until_date}"
 
-    # ── 2. Obtener lista de IDs + metadata (Subject + From) ─────────────────
+    # ── 2. Obtener lista de IDs ──────────────────────────────────────────────
     try:
         resp = httpx.get(
             "https://gmail.googleapis.com/gmail/v1/users/me/messages",
             headers=auth_headers,
-            params={"q": query, "maxResults": 100},
+            params={"q": query, "maxResults": 30},
             timeout=15,
         )
         if resp.status_code == 401:
@@ -150,44 +135,15 @@ def _fetch_gmail_emails_oauth(
     if not message_refs:
         return {"ok": True, "emails": [], "total": 0, "new_senders": []}
 
-    # ── 3. Obtener metadata para pre-filtrar (modo keyword) ──────────────────
-    candidates = []
-    for msg_ref in message_refs[:50]:
-        try:
-            meta = httpx.get(
-                f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{msg_ref['id']}",
-                headers=auth_headers,
-                params={"format": "metadata", "metadataHeaders": ["From", "Subject"]},
-                timeout=15,
-            )
-            meta.raise_for_status()
-            payload = meta.json().get("payload", {})
-            from_raw = _get_header(payload, "From")
-            subject  = _get_header(payload, "Subject")
-            from_email = _extract_email_address(from_raw)
-            candidates.append({"id": msg_ref["id"], "from": from_email, "subject": subject})
-        except Exception:
-            continue  # mensaje individual no bloquea el resto
-
-    # En modo keyword, pre-filtrar por heurística antes de pagar el fetch completo
-    if not bank_senders:
-        filtered = [
-            c for c in candidates
-            if _BANK_DOMAIN_RE.search(c["from"])
-            or _FINANCIAL_SUBJECT_RE.search(c["subject"])
-        ]
-        # Si la heurística es demasiado restrictiva (pocos candidatos) o la lista
-        # es pequeña, pasarlos todos — el LLM filtra mejor que el regex.
-        candidates = filtered if len(filtered) >= 5 else candidates
-
-    # ── 4. Fetch completo solo de los candidatos ─────────────────────────────
+    # ── 3. Fetch completo de cada resultado ──────────────────────────────────
+    # Gmail ya filtró — no hay heurística local. El LLM decide qué es transacción.
     emails = []
     new_senders: list[str] = []
 
-    for c in candidates:
+    for msg_ref in message_refs:
         try:
             msg_resp = httpx.get(
-                f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{c['id']}",
+                f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{msg_ref['id']}",
                 headers=auth_headers,
                 params={"format": "full"},
                 timeout=15,
@@ -195,16 +151,20 @@ def _fetch_gmail_emails_oauth(
             msg_resp.raise_for_status()
             payload = msg_resp.json().get("payload", {})
 
+            from_raw   = _get_header(payload, "From")
+            subject    = _get_header(payload, "Subject")
+            from_email = _extract_email_address(from_raw)
+
             raw = _extract_gmail_part(payload)
             raw = re.sub(r"<[^>]+>", " ", raw)
             raw = re.sub(r"\s+", " ", raw).strip()[:3000]
 
             if raw:
-                emails.append({"id": c["id"], "from": c["from"], "subject": c["subject"], "body": raw})
+                emails.append({"id": msg_ref["id"], "from": from_email, "subject": subject, "body": raw})
 
-                # Detectar remitentes nuevos (no estaban en la lista configurada)
-                if bank_senders is not None and c["from"].lower() not in configured:
-                    new_senders.append(c["from"])
+                # Auto-descubrir remitentes nuevos cuando ya hay senders configurados
+                if bank_senders is not None and from_email.lower() not in configured:
+                    new_senders.append(from_email)
         except Exception:
             continue
 
@@ -212,7 +172,7 @@ def _fetch_gmail_emails_oauth(
         "ok":          True,
         "emails":      emails,
         "total":       len(emails),
-        "new_senders": list(dict.fromkeys(new_senders)),  # deduplicado, orden preservado
+        "new_senders": list(dict.fromkeys(new_senders)),
     }
 
 
