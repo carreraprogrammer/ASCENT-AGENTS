@@ -12,6 +12,7 @@ from adapters.rails_http import BASE_URL as API_BASE_URL, build_auth_headers
 from ports.messenger import MessengerPort
 from ports.rails_api import RailsApiPort
 from services.chat_context import flatten_transaction, normalize_telegram_html, parse_api_date
+from services.coaching_framework import get_topic, available_topics
 from services.web_search import web_search as _web_search_http
 
 logger = logging.getLogger(__name__)
@@ -653,6 +654,29 @@ def build_tools() -> list[dict[str, Any]]:
                 "required": [],
             },
         },
+        {
+            "name": "get_coaching_framework",
+            "description": (
+                "Consulta el marco de coaching financiero cuando el usuario pregunta sobre estrategia "
+                "(deuda, ahorro, fondo de emergencia, prioridades), o cuando necesitás razonar sobre "
+                "su situación estructural. NO llamar para registrar transacciones ni consultar balance."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "topic": {
+                        "type": "string",
+                        "enum": available_topics(),
+                        "description": (
+                            "categorias_agencia | fondo_emergencia | deuda_estrategia | "
+                            "ratios_salud | fases_financieras | conducta_financiera | "
+                            "presupuesto_discrecional | pagos_anticipados | overflow_excedente"
+                        ),
+                    }
+                },
+                "required": ["topic"],
+            },
+        },
     ]
 
 
@@ -1006,5 +1030,6 @@ def build_tool_map(
         "update_income_source": lambda p: _patch(f"/api/v1/income_sources/{p.pop('id')}", p),
         "delete_income_source": lambda p: _delete(f"/api/v1/income_sources/{p['id']}"),
         "web_search": _web_search_with_notice,
+        "get_coaching_framework": lambda p: get_topic(p.get("topic", "")),
         "send_telegram": lambda p: state.update({"responded": True}) or _send_telegram(messenger, p, state),
     }

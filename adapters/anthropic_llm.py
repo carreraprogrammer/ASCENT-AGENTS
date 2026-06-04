@@ -36,11 +36,22 @@ class AnthropicLlmProvider(LlmProviderPort):
             {"role": "user", "content": initial_message},
         ]
 
+        # El system prompt se cachea con prompt caching de Anthropic.
+        # Costo: solo se cobra en el primer hit por ventana de 5 min.
+        # Impacto: ~90% de reducción de costo en tokens de input del system prompt.
+        cached_system = [
+            {
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+
         for i in range(max_iterations):
             response = self._client.messages.create(
                 model=model or self._default_model,
                 max_tokens=MAX_TOKENS,
-                system=system_prompt,
+                system=cached_system,
                 tools=tools,
                 messages=messages,
             )
