@@ -313,7 +313,10 @@ def build_tools() -> list[dict[str, Any]]:
             "description": (
                 "Actualiza el contexto financiero. "
                 "Si el usuario confirma que no tiene deudas, pasá debts_confirmed_at con la fecha de hoy (ISO 8601). "
-                "Eso distingue 'sin deudas confirmadas' de 'no registró sus deudas'."
+                "Eso distingue 'sin deudas confirmadas' de 'no registró sus deudas'. "
+                "Para fijar el aporte mensual comprometido a un objetivo (deuda/emergencia/inversión), "
+                "usá monthly_goal_contribution — ese monto se descuenta del free_margin en TODOS los "
+                "presupuestos futuros, igual que el arriendo."
             ),
             "input_schema": {
                 "type": "object",
@@ -324,6 +327,15 @@ def build_tools() -> list[dict[str, Any]]:
                     },
                     "strategy": {"type": "string", "enum": ["snowball", "avalanche"]},
                     "reward_pct": {"type": "integer", "minimum": 1, "maximum": 100},
+                    "monthly_goal_contribution": {
+                        "type": "integer",
+                        "description": (
+                            "Monto mensual fijo comprometido al objetivo financiero (en COP). "
+                            "Se trata como obligación comprometida en el presupuesto — no como discrecional. "
+                            "Calculalo desde commitment_gap del CashFlowRunway, no desde un porcentaje fijo. "
+                            "Actualizalo si el commitment_gap cambia significativamente entre meses."
+                        ),
+                    },
                     "notes": {"type": "string"},
                     "debts_confirmed_at": {
                         "type": "string",

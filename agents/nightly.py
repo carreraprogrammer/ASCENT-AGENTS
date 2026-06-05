@@ -1118,20 +1118,47 @@ Si get_telegram_messages devuelve resolved_callbacks:
 ═══ ALERTA FIN DE MES ═══
 {alert_block}
 
-═══ DEPLOY ON ARRIVAL ═══
-Cuando detectés que entró un ingreso HOY (transacción income confirmed con date = hoy):
-- Revisá cash_flow_runway.commitment_gap del get_summary ya cargado.
-- Si commitment_gap > 0 y financial_context.phase == "debt_payoff":
-  Al final del resumen, incluí un bloque separado:
-  "💰 <b>Plata disponible para abonar HOY</b>
-   Tenés <b>$[commitment_gap formateado]</b> seguros después de cubrir tus obligaciones y gasto diario.
-   Si lo abonás a [deuda_prioritaria] ahora, no comprometés ni tu comida ni tus servicios."
-  - deuda_prioritaria: usa debts_summary.recommended_payment.debt_name si está disponible; si no, "tu deuda prioritaria".
-  - NO incluir botones — el usuario puede responder por el chat si quiere actuar.
-- Si commitment_gap > 0 y phase == "emergency_fund":
-  "💰 Tenés $[commitment_gap] disponibles hoy para reforzar tu colchón de emergencia."
-- Si commitment_gap <= 0 o health_status != "comfortable": omitir esta sección.
+═══ APORTE COMPROMETIDO A OBJETIVO (monthly_goal_contribution) ═══
+El usuario tiene un campo monthly_goal_contribution en su contexto financiero.
+Cuando está configurado, ese monto se descuenta del free_margin en cada propuesta
+de presupuesto — tratado exactamente igual que el arriendo o los créditos.
+Tu trabajo: calcularlo, proponerlo, y actualizarlo cuando sea necesario.
+
+CUÁNDO ACTIVAR ESTA LÓGICA — solo si se cumplen las dos condiciones:
+1. Entró un ingreso HOY (transacción income confirmed con date = hoy)
+2. financial_context.phase ∈ ["debt_payoff", "emergency_fund"]
+
+CÓMO CALCULAR EL APORTE SUGERIDO:
+- Tomá cash_flow_runway.commitment_gap del get_summary
+- El aporte sugerido = commitment_gap × 0.8 (dejamos 20% de buffer operativo)
+- Redondeá a miles: round(sugerido / 1000) × 1000
+- No puede superar commitment_gap ni free_margin del plan
+
+CASO A — monthly_goal_contribution no está configurado (null o 0):
+  Incluí al final del resumen:
+  "💡 <b>Aporte a tu objetivo</b>
+   Calculé que podés comprometer <b>$[sugerido formateado]/mes</b> a [objetivo] sin
+   arriesgar tus obligaciones ni tu gasto diario. Ese monto entraría como línea fija
+   en tu presupuesto — igual que el arriendo. ¿Lo fijamos?"
+  Enviá inline_keyboard:
+  [[{{"text": "Sí, fijar $[sugerido]", "callback_data": "set_goal_contribution:[sugerido]"}}],
+   [{{"text": "Ajustar monto", "callback_data": "goal_contribution:adjust"}}],
+   [{{"text": "Después", "callback_data": "goal_contribution:skip"}}]]
+
+CASO B — monthly_goal_contribution ya está configurado:
+  Si commitment_gap > 0 y health_status == "comfortable":
+    Recordatorio breve al final del resumen:
+    "💰 Tu aporte comprometido de $[monthly_goal_contribution] a [objetivo] sigue en pie.
+     commitment_gap hoy: $[commitment_gap] — podés ejecutarlo desde el chat."
+  Si commitment_gap < monthly_goal_contribution × 0.7 (el aporte ya no cabe cómodamente):
+    "⚠️ Tu aporte fijo de $[monthly_goal_contribution] a [objetivo] está ajustado este mes
+     (gap disponible: $[commitment_gap]). Considerá reducirlo temporalmente."
+
+REGLAS:
+- Si health_status != "comfortable": omitir esta sección completamente.
 - Si NO llegó ningún ingreso hoy: omitir esta sección completamente.
+- Los callbacks "set_goal_contribution" y "goal_contribution:adjust" los maneja el chat agent
+  llamando update_financial_context(monthly_goal_contribution: N).
 
 ═══ NARRATIVA DE PROGRESO EN DEUDAS ═══
 Si financial_context.phase == "debt_payoff":
