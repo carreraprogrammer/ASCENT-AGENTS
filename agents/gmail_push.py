@@ -30,6 +30,23 @@ COLOMBIA_TZ = timezone(timedelta(hours=-5))
 GMAIL_HISTORY_URL = "https://gmail.googleapis.com/gmail/v1/users/me/history"
 GMAIL_MESSAGE_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages/{}"
 
+CARD_PAYMENT_RE = re.compile(
+    r"(descuento\s+pago|pago|abono|abonad[oa]|pago\s+m[ií]nimo|d[eé]bito).*"
+    r"(tarjeta\s+de\s+cr[eé]dito|tarjeta\s+credito|\btc\b)"
+    r"|"
+    r"(tarjeta\s+de\s+cr[eé]dito|tarjeta\s+credito|\btc\b).*"
+    r"(pago|abono|abonad[oa]|pago\s+m[ií]nimo)",
+    re.IGNORECASE,
+)
+SELF_TRANSFER_RE = re.compile(
+    r"(env[ií]o|transferencia\s+enviada).*(bre-b|llave).*(daniel\s+(carrera|alejandro)|1085333083)",
+    re.IGNORECASE,
+)
+INBOUND_TRANSFER_RE = re.compile(
+    r"(abono|transferencia|recibiste|recibido).*(bre-b|llave|cta\s+de\s+ahorros|cuenta\s+de\s+ahorros)",
+    re.IGNORECASE,
+)
+
 
 def _get_header(payload: dict, name: str) -> str:
     for h in payload.get("headers", []):
@@ -143,6 +160,27 @@ def _fetch_message(access_token: str, message_id: str) -> dict | None:
         return None
 
 
+def _email_text(email: dict) -> str:
+    return " ".join(
+        str(email.get(key, ""))
+        for key in ("from", "subject", "body")
+    )
+
+
+def _should_ignore_email(email: dict) -> tuple[bool, str | None]:
+    text = _email_text(email)
+    if CARD_PAYMENT_RE.search(text):
+        return True, "credit_card_payment"
+    if SELF_TRANSFER_RE.search(text):
+        return True, "self_transfer"
+    return False, None
+
+
+def _force_pending_email(email: dict) -> bool:
+    text = _email_text(email)
+    return bool(INBOUND_TRANSFER_RE.search(text))
+
+
 def _get_gmail_token(account_id: int) -> tuple[str | None, list[str]]:
     """Obtiene access_token fresco y bank_senders desde Rails."""
     try:
@@ -165,10 +203,75 @@ def _build_tool_map(account_id: int) -> dict:
 
     headers = build_auth_headers(str(account_id))
 
+    def get_categories(_inp: dict) -> dict:
+        try:
+            r = httpx.get(
+                f"{API_BASE_URL}/api/v1/categories",
+                headers=headers,
+                timeout=15,
+            )
+            r.raise_for_status()
+            rows = r.json().get("data", [])
+            categories = []
+            for raw in rows:
+                attrs = raw.get("attributes", raw)
+                subcategories = raw.get("relationships", {}).get("subcategories", {}).get("data", [])
+                categories.append({
+                    "id": raw.get("id"),
+                    "name": attrs.get("name"),
+                    "code": attrs.get("code"),
+                    "category_type": attrs.get("category_type"),
+                    "subcategories": [
+                        {
+                            "id": sub.get("id"),
+                            "name": sub.get("attributes", {}).get("name"),
+                            "code": sub.get("attributes", {}).get("code"),
+                        }
+                        for sub in subcategories
+                    ],
+                })
+            return {"ok": True, "categories": categories}
+        except Exception as e:
+            logger.warning("[GmailPush] get_categories error: %s", e)
+            return {"ok": False, "error": str(e)}
+
     def create_transaction(inp: dict) -> dict:
         try:
             payload = _normalize_transaction_payload(inp)
             source_event_id = (payload.get("metadata") or {}).get("source_event_id")
+            raw_text = " ".join(
+                str(value)
+                for value in [
+                    payload.get("concept"),
+                    payload.get("product"),
+                    (payload.get("metadata") or {}).get("raw_text"),
+                    (payload.get("metadata") or {}).get("subject"),
+                ]
+                if value
+            )
+            payload["source"] = "gmail"
+            if CARD_PAYMENT_RE.search(raw_text):
+                logger.info(
+                    "[GmailPush] blocked credit card payment source_event_id=%s concept=%s",
+                    source_event_id,
+                    payload.get("concept"),
+                )
+                return {"ok": True, "created": False, "ignored": True, "reason": "credit_card_payment"}
+            if SELF_TRANSFER_RE.search(raw_text):
+                logger.info(
+                    "[GmailPush] blocked self transfer source_event_id=%s concept=%s",
+                    source_event_id,
+                    payload.get("concept"),
+                )
+                return {"ok": True, "created": False, "ignored": True, "reason": "self_transfer"}
+            if INBOUND_TRANSFER_RE.search(raw_text) and payload.get("status") != "pending":
+                logger.info(
+                    "[GmailPush] forcing pending inbound transfer source_event_id=%s concept=%s",
+                    source_event_id,
+                    payload.get("concept"),
+                )
+                payload["status"] = "pending"
+
             logger.info(
                 "[GmailPush] create_transaction amount=%s concept=%s type=%s source_event_id=%s",
                 payload.get("amount"),
@@ -200,17 +303,23 @@ def _build_tool_map(account_id: int) -> dict:
             logger.error("[GmailPush] create_transaction error: %s", e)
             return {"ok": False, "error": str(e)}
 
-    return {"create_transaction": create_transaction}
+    return {"get_categories": get_categories, "create_transaction": create_transaction}
 
 
 TOOLS = [
+    {
+        "name": "get_categories",
+        "description": "Devuelve categorías y subcategorías disponibles. Usala antes de create_transaction para elegir subcategory_code.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
     {
         "name": "create_transaction",
         "description": (
             "Registra una transacción financiera detectada en el correo. "
             "SIEMPRE incluí metadata.source_event_id = id del correo Gmail para prevenir duplicados. "
             "Si ya_existed=true, la transacción ya fue registrada por el análisis nocturno — no es un error. "
-            "source debe ser 'gmail'. status='confirmed' si el monto y tipo son claros, 'pending' si hay duda."
+            "source debe ser 'gmail'. status='confirmed' si el monto, tipo y subcategoría son claros; "
+            "status='pending' si hay duda real. No registra pagos/abonos de tarjeta de crédito."
         ),
         "input_schema": {
             "type": "object",
@@ -237,17 +346,24 @@ SYSTEM_PROMPT = """Eres el asistente financiero de Daniel 15K procesando correos
 
 Recibirás uno o más correos de Gmail. Tu tarea:
 1. Determinar si cada correo es una notificación financiera (transacción bancaria, pago, transferencia, recarga).
-2. Si es financiero: extraer fecha, concepto, monto y tipo (expense/income) y llamar create_transaction.
+2. Si es financiero: llamar get_categories, extraer fecha, concepto, monto, tipo y subcategoría, y llamar create_transaction.
 3. Si NO es financiero (publicidad, newsletters, confirmaciones de cuenta): ignorar completamente.
 
 Reglas críticas:
 - SIEMPRE incluir metadata.source_event_id = id del correo (campo "id" de cada email).
+- SIEMPRE incluir metadata.raw_text y metadata.subject con el texto fuente relevante.
 - source SIEMPRE es "gmail".
-- Si el correo menciona tarjeta de crédito/TC: payment_source="credit_card".
+- Compras con tarjeta de crédito/TC: registrar con payment_source="credit_card".
+- Pagos/abonos/descuentos de tarjeta de crédito NO son gasto nuevo. Si el correo dice "Pago tarjeta",
+  "Descuento Pago Tarjeta de Crédito", "Abono TC", "se han abonado", "pago mínimo" o similar: IGNORAR.
 - Si menciona débito/Nequi/transferencia: payment_source="debit".
+- Transferencias internas o hacia el mismo Daniel NO son ingreso/gasto real. Ignorarlas.
+- Abonos/transferencias entrantes por Bre-B/llaves sin origen claro no se confirman automáticamente:
+  si decides registrarlas, usa status="pending" para revisión del usuario.
+- Siempre intenta asignar subcategory_code con get_categories.
+  Si la subcategoría es clara, confirmed; si no, pending o sin subcategory_code para que aparezca en revisión.
 - Davivienda puede enviar correos solo en HTML o snippets con asunto "DAVIVIENDA".
   Si el texto trae "Valor Transacción", fecha y monto, es financiero aunque el cuerpo sea breve.
-  Si el sentido no es completamente claro, registralo como status="pending" en vez de ignorarlo.
 - No envíes mensajes al usuario. Solo registra transacciones silenciosamente.
 - Si un correo no tiene suficiente información para determinar monto o tipo, ignóralo."""
 
@@ -273,6 +389,12 @@ def run_gmail_push(account_id: int, history_id: str) -> None:
     for mid in message_ids:
         msg = _fetch_message(access_token, mid)
         if msg:
+            should_ignore, reason = _should_ignore_email(msg)
+            if should_ignore:
+                logger.info("[GmailPush] ignoring email id=%s reason=%s", mid, reason)
+                continue
+            if _force_pending_email(msg):
+                msg["force_pending"] = True
             emails.append(msg)
 
     if not emails:
@@ -282,7 +404,8 @@ def run_gmail_push(account_id: int, history_id: str) -> None:
     logger.info("[GmailPush] account=%s procesando %d correos", account_id, len(emails))
 
     emails_text = "\n\n---\n\n".join(
-        f"[ID: {e['id']}]\nDe: {e['from']}\nAsunto: {e['subject']}\n\n{e['body']}"
+        f"[ID: {e['id']}]\nDe: {e['from']}\nAsunto: {e['subject']}\n"
+        f"Force pending: {'sí' if e.get('force_pending') else 'no'}\n\n{e['body']}"
         for e in emails
     )
     initial_message = f"Procesa estos {len(emails)} correo(s) de Gmail:\n\n{emails_text}"
