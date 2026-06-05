@@ -22,6 +22,13 @@ import httpx
 
 from adapters.rails_http import BASE_URL as API_BASE_URL, build_auth_headers
 from services.llm_factory import build_llm_provider, resolve_llm_model
+from services.transaction_rules import (
+    TRANSACTION_CREATION_RULES,
+    normalize_categories,
+    quick_category_buttons,
+    should_force_pending,
+    transaction_guard_reason,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -29,23 +36,6 @@ COLOMBIA_TZ = timezone(timedelta(hours=-5))
 
 GMAIL_HISTORY_URL = "https://gmail.googleapis.com/gmail/v1/users/me/history"
 GMAIL_MESSAGE_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages/{}"
-
-CARD_PAYMENT_RE = re.compile(
-    r"(descuento\s+pago|pago|abono|abonad[oa]|pago\s+m[ií]nimo|d[eé]bito).*"
-    r"(tarjeta\s+de\s+cr[eé]dito|tarjeta\s+credito|\btc\b)"
-    r"|"
-    r"(tarjeta\s+de\s+cr[eé]dito|tarjeta\s+credito|\btc\b).*"
-    r"(pago|abono|abonad[oa]|pago\s+m[ií]nimo)",
-    re.IGNORECASE,
-)
-SELF_TRANSFER_RE = re.compile(
-    r"(env[ií]o|transferencia\s+enviada).*(bre-b|llave).*(daniel\s+(carrera|alejandro)|1085333083)",
-    re.IGNORECASE,
-)
-INBOUND_TRANSFER_RE = re.compile(
-    r"(abono|transferencia|recibiste|recibido).*(bre-b|llave|cta\s+de\s+ahorros|cuenta\s+de\s+ahorros)",
-    re.IGNORECASE,
-)
 
 
 def _get_header(payload: dict, name: str) -> str:
@@ -168,17 +158,12 @@ def _email_text(email: dict) -> str:
 
 
 def _should_ignore_email(email: dict) -> tuple[bool, str | None]:
-    text = _email_text(email)
-    if CARD_PAYMENT_RE.search(text):
-        return True, "credit_card_payment"
-    if SELF_TRANSFER_RE.search(text):
-        return True, "self_transfer"
-    return False, None
+    reason = transaction_guard_reason(_email_text(email))
+    return bool(reason), reason
 
 
 def _force_pending_email(email: dict) -> bool:
-    text = _email_text(email)
-    return bool(INBOUND_TRANSFER_RE.search(text))
+    return should_force_pending(_email_text(email))
 
 
 def _get_gmail_token(account_id: int) -> tuple[str | None, list[str]]:
@@ -202,8 +187,71 @@ def _build_tool_map(account_id: int) -> dict:
     from agents.nightly import _normalize_transaction_payload
 
     headers = build_auth_headers(str(account_id))
+    category_cache: list[dict] = []
+
+    def emit_ui_event(event_type: str, payload: dict) -> None:
+        try:
+            response = httpx.post(
+                f"{API_BASE_URL}/api/v1/agent_events",
+                headers=headers,
+                json={"event_type": event_type, "payload": payload},
+                timeout=15,
+            )
+            response.raise_for_status()
+        except Exception as e:
+            logger.warning("[GmailPush] emit_ui_event %s error: %s", event_type, e)
+
+    def notify_transaction_created(transaction: dict, payload: dict) -> None:
+        txn_id = transaction.get("id")
+        attrs = transaction.get("attributes", {})
+        status = attrs.get("status") or payload.get("status")
+        concept = attrs.get("concept") or payload.get("concept") or "Transacción"
+        amount = attrs.get("amount") or payload.get("amount")
+        transaction_type = attrs.get("transaction_type") or payload.get("transaction_type")
+        subcategory_code = attrs.get("subcategory_code") or payload.get("subcategory_code")
+
+        amount_text = f"${int(float(amount)):,}".replace(",", ".") if amount is not None else "monto pendiente"
+        title = "Transacción creada desde Gmail"
+        body = f"Creé {concept} por {amount_text}."
+        emit_ui_event("data_changed", {"resource": "transactions"})
+
+        needs_review = status == "pending" or not subcategory_code
+        if not needs_review:
+            emit_ui_event(
+                "show_card",
+                {
+                    "title": title,
+                    "body": f"{body} Clasificación: {subcategory_code}.",
+                    "tone": "success",
+                    "transaction_id": txn_id,
+                },
+            )
+            return
+
+        if not category_cache:
+            get_categories({})
+
+        buttons = []
+        if status == "pending":
+            buttons.append({"text": "Confirmar", "callback_data": f"confirm:{txn_id}"})
+        buttons.extend(
+            {"text": button["text"], "callback_data": f"cat:{txn_id}:{button['code']}"}
+            for button in quick_category_buttons(category_cache, transaction_type)
+        )
+        buttons.append({"text": "Luego", "callback_data": f"skip:{txn_id}"})
+
+        emit_ui_event(
+            "show_quick_replies",
+            {
+                "title": title,
+                "body": f"{body} Necesito que revises la clasificación.",
+                "buttons": buttons[:7],
+                "transaction_id": txn_id,
+            },
+        )
 
     def get_categories(_inp: dict) -> dict:
+        nonlocal category_cache
         try:
             r = httpx.get(
                 f"{API_BASE_URL}/api/v1/categories",
@@ -212,25 +260,8 @@ def _build_tool_map(account_id: int) -> dict:
             )
             r.raise_for_status()
             rows = r.json().get("data", [])
-            categories = []
-            for raw in rows:
-                attrs = raw.get("attributes", raw)
-                subcategories = raw.get("relationships", {}).get("subcategories", {}).get("data", [])
-                categories.append({
-                    "id": raw.get("id"),
-                    "name": attrs.get("name"),
-                    "code": attrs.get("code"),
-                    "category_type": attrs.get("category_type"),
-                    "subcategories": [
-                        {
-                            "id": sub.get("id"),
-                            "name": sub.get("attributes", {}).get("name"),
-                            "code": sub.get("attributes", {}).get("code"),
-                        }
-                        for sub in subcategories
-                    ],
-                })
-            return {"ok": True, "categories": categories}
+            category_cache = normalize_categories(rows)
+            return {"ok": True, "categories": category_cache}
         except Exception as e:
             logger.warning("[GmailPush] get_categories error: %s", e)
             return {"ok": False, "error": str(e)}
@@ -250,21 +281,16 @@ def _build_tool_map(account_id: int) -> dict:
                 if value
             )
             payload["source"] = "gmail"
-            if CARD_PAYMENT_RE.search(raw_text):
+            guard_reason = transaction_guard_reason(raw_text)
+            if guard_reason:
                 logger.info(
-                    "[GmailPush] blocked credit card payment source_event_id=%s concept=%s",
+                    "[GmailPush] blocked transaction source_event_id=%s reason=%s concept=%s",
                     source_event_id,
+                    guard_reason,
                     payload.get("concept"),
                 )
-                return {"ok": True, "created": False, "ignored": True, "reason": "credit_card_payment"}
-            if SELF_TRANSFER_RE.search(raw_text):
-                logger.info(
-                    "[GmailPush] blocked self transfer source_event_id=%s concept=%s",
-                    source_event_id,
-                    payload.get("concept"),
-                )
-                return {"ok": True, "created": False, "ignored": True, "reason": "self_transfer"}
-            if INBOUND_TRANSFER_RE.search(raw_text) and payload.get("status") != "pending":
+                return {"ok": True, "created": False, "ignored": True, "reason": guard_reason}
+            if should_force_pending(raw_text) and payload.get("status") != "pending":
                 logger.info(
                     "[GmailPush] forcing pending inbound transfer source_event_id=%s concept=%s",
                     source_event_id,
@@ -288,10 +314,13 @@ def _build_tool_map(account_id: int) -> dict:
             if r.status_code == 201:
                 data = r.json()["data"]
                 logger.info("[GmailPush] create_transaction OK id=%s", data["id"])
+                notify_transaction_created(data, payload)
                 return {"ok": True, "created": True, "id": data["id"],
                         "concept": data["attributes"]["concept"],
                         "amount": data["attributes"]["amount"],
-                        "status": data["attributes"]["status"]}
+                        "status": data["attributes"]["status"],
+                        "subcategory_code": data["attributes"].get("subcategory_code"),
+                        "payment_source": data["attributes"].get("payment_source")}
             if r.status_code == 409:
                 body = r.json()
                 logger.info("[GmailPush] create_transaction duplicate source_event_id=%s", source_event_id)
@@ -353,19 +382,15 @@ Reglas críticas:
 - SIEMPRE incluir metadata.source_event_id = id del correo (campo "id" de cada email).
 - SIEMPRE incluir metadata.raw_text y metadata.subject con el texto fuente relevante.
 - source SIEMPRE es "gmail".
-- Compras con tarjeta de crédito/TC: registrar con payment_source="credit_card".
-- Pagos/abonos/descuentos de tarjeta de crédito NO son gasto nuevo. Si el correo dice "Pago tarjeta",
-  "Descuento Pago Tarjeta de Crédito", "Abono TC", "se han abonado", "pago mínimo" o similar: IGNORAR.
 - Si menciona débito/Nequi/transferencia: payment_source="debit".
-- Transferencias internas o hacia el mismo Daniel NO son ingreso/gasto real. Ignorarlas.
-- Abonos/transferencias entrantes por Bre-B/llaves sin origen claro no se confirman automáticamente:
-  si decides registrarlas, usa status="pending" para revisión del usuario.
 - Siempre intenta asignar subcategory_code con get_categories.
   Si la subcategoría es clara, confirmed; si no, pending o sin subcategory_code para que aparezca en revisión.
 - Davivienda puede enviar correos solo en HTML o snippets con asunto "DAVIVIENDA".
   Si el texto trae "Valor Transacción", fecha y monto, es financiero aunque el cuerpo sea breve.
-- No envíes mensajes al usuario. Solo registra transacciones silenciosamente.
-- Si un correo no tiene suficiente información para determinar monto o tipo, ignóralo."""
+- No tienes herramienta de mensajería directa. create_transaction avisará a la app cuando cree una transacción
+  y pedirá clasificación con botones si queda pendiente o sin subcategoría.
+- Si un correo no tiene suficiente información para determinar monto o tipo, ignóralo.
+""" + "\n\n" + TRANSACTION_CREATION_RULES
 
 
 def run_gmail_push(account_id: int, history_id: str) -> None:
