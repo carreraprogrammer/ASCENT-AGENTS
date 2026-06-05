@@ -216,8 +216,7 @@ def build_tools() -> list[dict[str, Any]]:
                 "Para aportes a bolsillos, podés incluir sinking_fund_id; si lo omitís, la API intentará vincularlo por monto y concepto. "
                 "Si el usuario dice que pagó una obligación por adelantado o para el siguiente mes, usa metadata con applies_to_month, applies_to_year, applies_to_period='YYYY-MM' y prepaid_obligation=true. "
                 "Si el usuario menciona con qué pagó (tarjeta, Nequi, efectivo, débito), incluí payment_source: "
-                "'credit_card' para cualquier tarjeta de crédito, 'debit' para débito/Nequi/transferencia, 'cash' para efectivo. "
-                "Las compras con credit_card quedan como pendientes de pagar hasta que llegue el abono al banco."
+                "'credit_card' para cualquier tarjeta de crédito, 'debit' para débito/Nequi/transferencia, 'cash' para efectivo."
             ),
             "input_schema": {
                 "type": "object",
