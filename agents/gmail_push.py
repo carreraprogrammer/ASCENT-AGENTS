@@ -13,6 +13,7 @@ source_event_id = Gmail message ID garantiza que nunca se creen duplicados.
 """
 
 import base64
+import html
 import logging
 import re
 from datetime import datetime, timezone, timedelta
@@ -37,6 +38,25 @@ def _get_header(payload: dict, name: str) -> str:
     return ""
 
 
+def _decode_body_data(data: str) -> str:
+    if not data:
+        return ""
+
+    try:
+        padding = "=" * (-len(data) % 4)
+        return base64.urlsafe_b64decode(data + padding).decode("utf-8", errors="ignore")
+    except Exception:
+        return ""
+
+
+def _html_to_text(raw: str) -> str:
+    raw = re.sub(r"(?is)<(script|style).*?>.*?</\1>", " ", raw)
+    raw = re.sub(r"(?i)<br\s*/?>", "\n", raw)
+    raw = re.sub(r"(?i)</(p|div|tr|li|table|h[1-6])>", "\n", raw)
+    raw = re.sub(r"<[^>]+>", " ", raw)
+    return html.unescape(raw)
+
+
 def _extract_part(part: dict) -> str:
     mime = part.get("mimeType", "")
     body = part.get("body", {})
@@ -44,12 +64,21 @@ def _extract_part(part: dict) -> str:
     parts = part.get("parts", [])
 
     if mime == "text/plain" and data:
-        try:
-            return base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="ignore")
-        except Exception:
-            return ""
+        return _decode_body_data(data)
+    if mime == "text/html" and data:
+        return _html_to_text(_decode_body_data(data))
     if parts:
-        return "".join(_extract_part(p) for p in parts)
+        plain_parts = []
+        fallback_parts = []
+        for p in parts:
+            text = _extract_part(p)
+            if not text:
+                continue
+            if p.get("mimeType") == "text/plain":
+                plain_parts.append(text)
+            else:
+                fallback_parts.append(text)
+        return "\n".join(plain_parts or fallback_parts)
     return ""
 
 
@@ -95,12 +124,14 @@ def _fetch_message(access_token: str, message_id: str) -> dict | None:
             timeout=15,
         )
         resp.raise_for_status()
-        payload = resp.json().get("payload", {})
+        data = resp.json()
+        payload = data.get("payload", {})
 
         from_raw = _get_header(payload, "From")
         subject  = _get_header(payload, "Subject")
+        snippet  = data.get("snippet", "")
         raw      = _extract_part(payload)
-        raw      = re.sub(r"<[^>]+>", " ", raw)
+        raw      = raw or snippet
         raw      = re.sub(r"\s+", " ", raw).strip()[:3000]
 
         if not raw:
@@ -137,6 +168,14 @@ def _build_tool_map(account_id: int) -> dict:
     def create_transaction(inp: dict) -> dict:
         try:
             payload = _normalize_transaction_payload(inp)
+            source_event_id = (payload.get("metadata") or {}).get("source_event_id")
+            logger.info(
+                "[GmailPush] create_transaction amount=%s concept=%s type=%s source_event_id=%s",
+                payload.get("amount"),
+                payload.get("concept"),
+                payload.get("transaction_type"),
+                source_event_id,
+            )
             r = httpx.post(
                 f"{API_BASE_URL}/api/v1/transactions",
                 headers=headers,
@@ -145,16 +184,20 @@ def _build_tool_map(account_id: int) -> dict:
             )
             if r.status_code == 201:
                 data = r.json()["data"]
+                logger.info("[GmailPush] create_transaction OK id=%s", data["id"])
                 return {"ok": True, "created": True, "id": data["id"],
                         "concept": data["attributes"]["concept"],
                         "amount": data["attributes"]["amount"],
                         "status": data["attributes"]["status"]}
             if r.status_code == 409:
                 body = r.json()
+                logger.info("[GmailPush] create_transaction duplicate source_event_id=%s", source_event_id)
                 return {"ok": True, "created": False, "already_existed": True,
                         "detail": body.get("errors", [{}])[0].get("detail", "")}
+            logger.warning("[GmailPush] create_transaction failed status=%s body=%s", r.status_code, r.text[:300])
             return {"ok": False, "status_code": r.status_code, "error": r.text[:300]}
         except Exception as e:
+            logger.error("[GmailPush] create_transaction error: %s", e)
             return {"ok": False, "error": str(e)}
 
     return {"create_transaction": create_transaction}
@@ -202,6 +245,9 @@ Reglas críticas:
 - source SIEMPRE es "gmail".
 - Si el correo menciona tarjeta de crédito/TC: payment_source="credit_card".
 - Si menciona débito/Nequi/transferencia: payment_source="debit".
+- Davivienda puede enviar correos solo en HTML o snippets con asunto "DAVIVIENDA".
+  Si el texto trae "Valor Transacción", fecha y monto, es financiero aunque el cuerpo sea breve.
+  Si el sentido no es completamente claro, registralo como status="pending" en vez de ignorarlo.
 - No envíes mensajes al usuario. Solo registra transacciones silenciosamente.
 - Si un correo no tiene suficiente información para determinar monto o tipo, ignóralo."""
 
