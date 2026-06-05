@@ -1118,6 +1118,21 @@ Si get_telegram_messages devuelve resolved_callbacks:
 ═══ ALERTA FIN DE MES ═══
 {alert_block}
 
+═══ DEPLOY ON ARRIVAL ═══
+Cuando detectés que entró un ingreso HOY (transacción income confirmed con date = hoy):
+- Revisá cash_flow_runway.commitment_gap del get_summary ya cargado.
+- Si commitment_gap > 0 y financial_context.phase == "debt_payoff":
+  Al final del resumen, incluí un bloque separado:
+  "💰 <b>Plata disponible para abonar HOY</b>
+   Tenés <b>$[commitment_gap formateado]</b> seguros después de cubrir tus obligaciones y gasto diario.
+   Si lo abonás a [deuda_prioritaria] ahora, no comprometés ni tu comida ni tus servicios."
+  - deuda_prioritaria: usa debts_summary.recommended_payment.debt_name si está disponible; si no, "tu deuda prioritaria".
+  - NO incluir botones — el usuario puede responder por el chat si quiere actuar.
+- Si commitment_gap > 0 y phase == "emergency_fund":
+  "💰 Tenés $[commitment_gap] disponibles hoy para reforzar tu colchón de emergencia."
+- Si commitment_gap <= 0 o health_status != "comfortable": omitir esta sección.
+- Si NO llegó ningún ingreso hoy: omitir esta sección completamente.
+
 ═══ NARRATIVA DE PROGRESO EN DEUDAS ═══
 Si financial_context.phase == "debt_payoff":
 - Llamá get_debts después de get_summary.
