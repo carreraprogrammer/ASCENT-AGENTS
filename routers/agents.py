@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from adapters.rails_http import RailsHttpAdapter
 from adapters.telegram_messenger import TelegramMessenger
 from agents.app_chat import handle_app_chat
+from agents.gmail_push import run_gmail_push
 from agents.nightly import run_nightly
 from agents.web_chat import handle_web_chat
 from agents.insight import run_insight_refresh
@@ -163,7 +164,22 @@ async def trigger_insight(body: InsightRequest, background_tasks: BackgroundTask
     return {"ok": True, "message": "Generando nuevo análisis en background."}
 
 
+class GmailPushRequest(BaseModel):
+    account_id: int
+    history_id: str
+
+
+@router.post("/gmail-push", dependencies=[Depends(_verify_service_token)])
+async def gmail_push(body: GmailPushRequest, background_tasks: BackgroundTasks) -> dict:
+    """
+    Recibe notificación push de Gmail vía Rails (que recibió el webhook de Pub/Sub).
+    Procesa los mensajes nuevos desde history_id en background.
+    """
+    background_tasks.add_task(run_gmail_push, account_id=body.account_id, history_id=body.history_id)
+    return {"ok": True, "account_id": body.account_id}
+
+
 @router.get("/health")
 async def health() -> dict:
     """Health check de los agentes."""
-    return {"ok": True, "agents": ["nightly", "planning", "web_chat", "insight"]}
+    return {"ok": True, "agents": ["nightly", "planning", "web_chat", "insight", "gmail_push"]}
