@@ -376,6 +376,23 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort,
         except Exception as e:
             return {"ok": False, "error": str(e)}
 
+    def get_classification_hints(inp: dict) -> dict:
+        merchant = (inp.get("merchant") or "").strip()
+        if not merchant:
+            return {"ok": False, "error": "merchant requerido"}
+        try:
+            import httpx
+            r = httpx.get(
+                f"{API_BASE_URL}/api/v1/transactions/classification_hints",
+                headers=api.headers(),
+                params={"merchant": merchant},
+                timeout=15,
+            )
+            r.raise_for_status()
+            return {"ok": True, **(r.json().get("data") or {})}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
     def create_transaction(inp: dict) -> dict:
         try:
             import httpx
@@ -560,6 +577,7 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort,
         "get_pending_transactions":      get_pending_transactions,
         "get_summary":                   get_summary,
         "get_debts":                     get_debts,
+        "get_classification_hints":      get_classification_hints,
         "create_transaction":            create_transaction,
         "update_transaction":            update_transaction,
         "send_telegram":                 send_telegram,
@@ -717,6 +735,22 @@ TOOLS = [
         "name": "get_pending_transactions",
         "description": "Transacciones con status=pending de días anteriores.",
         "input_schema": {"type": "object", "properties": {}, "required": []},
+    },
+    {
+        "name": "get_classification_hints",
+        "description": (
+            "Historial de clasificación del usuario para un comercio: candidates con subcategory_code, "
+            "count, share y typical_hours, más dominant (precalculado por la API) si el patrón es consistente. "
+            "Llamala ANTES de clasificar cada gasto nuevo o de resolver subcategorías pendientes, "
+            "pasando el comercio tal como aparece en el correo (ej: 'BOLD CAMILO 1789')."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "merchant": {"type": "string", "description": "Nombre del comercio, ej: 'BOLD CAMILO 1789'"},
+            },
+            "required": ["merchant"],
+        },
     },
     {
         "name": "create_transaction",
@@ -1272,8 +1306,14 @@ Para diagnóstico estructural con números reales → get_health_metrics().
 9. get_balance → balance real (SIEMPRE antes del resumen)
 10. get_pending_transactions → pendientes de días anteriores
 11. Registrar solo los gastos de Gmail que NO estén ya en Telegram/transactions → create_transaction
+    Antes de clasificar cada uno: get_classification_hints(merchant=comercio del correo).
+    - dominant presente → ese subcategory_code, status="confirmed", metadata.classification_source="pattern". Sin preguntar.
+    - 2+ candidates sin dominant → status="pending", subcategory_code del primero,
+      metadata.suggested_subcategories=[códigos de los 2 primeros], metadata.classification_source="agent".
+      typical_hours es evidencia: si la hora del gasto coincide con las de un candidate, ese va primero.
+    - samples=0 → tu mejor juicio, metadata.classification_source="agent".
 12. Para gastos inciertos → create_transaction(pending) + send_telegram con botones
-13. Resolver subcategorías pendientes: get_transactions → asignar las que se puedan → agrupar ambiguas
+13. Resolver subcategorías pendientes: get_transactions → get_classification_hints por comercio → asignar las que se puedan → agrupar ambiguas
 14. send_telegram → resumen con sección ⚙️ de gaps si aplica + sección 📂 de subcategorías pendientes si aplica
 15. Fin de mes (días 28–31): mencionarlo brevemente en el resumen ("Mayo empieza en X días"). Sin CTA, sin botones de wizard.
 16. create_night_analysis → SIEMPRE al final. Persistir análisis + insight del dashboard.
