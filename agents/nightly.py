@@ -1294,7 +1294,7 @@ Para diagnóstico estructural con números reales → get_health_metrics().
 [alertas de burn_rate si aplica]
 [pendientes con botones — UN mensaje por pendiente]
 
-⚙️ <b>El sistema necesita esto para ayudarte mejor:</b>
+⚙️ <b>Para completar tu contexto falta:</b>
 [SOLO si get_completeness devuelve dimensiones missing o partial]
 • income_profile missing → "Necesito conocer tus fuentes de ingreso para armar un plan real."
 • monthly_plan missing → "No hay plan confirmado para este mes. Sin eso el coaching es genérico."
