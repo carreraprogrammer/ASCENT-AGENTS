@@ -6,9 +6,10 @@ Flow:
   2. GET /api/v1/agent_insights/latest  — last persisted insight
   3. Drift check (Python, $0)
   4. If stable → skip
-  5. If should_refresh AND last_insight exists → Haiku validity check (~$0.001)
+  5. If should_refresh AND last_insight exists → validity check con el modelo rápido del provider
   6. If still_valid → skip
-  7. Sonnet structured generation (~$0.01-0.02)
+  7. Generación estructurada con el modelo de razonamiento (LLM_MODEL_INSIGHT,
+     ej. deepseek-reasoner) — corre de madrugada, la latencia no importa
   8. POST /api/v1/night_analyses  — stores NightAnalysis + AgentInsight atomically
 """
 
@@ -16,6 +17,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone, timedelta
 
 import httpx
@@ -29,6 +31,14 @@ COLOMBIA_TZ = timezone(timedelta(hours=-5))
 
 BALANCE_DRIFT_THRESHOLD        = 1_000_000
 COMMITMENT_GAP_DRIFT_THRESHOLD = 500_000
+
+
+def _insight_model() -> str | None:
+    """Modelo de razonamiento para la generación del insight (sin tools).
+
+    Si LLM_MODEL_INSIGHT no está configurado, usa el modelo default del provider.
+    """
+    return os.environ.get("LLM_MODEL_INSIGHT", "").strip() or None
 
 
 # ── Drift checker (Python mirror of InsightDriftChecker interactor) ───────────
@@ -143,8 +153,8 @@ def _post_night_analysis(payload: dict, headers_fn=build_auth_headers) -> dict:
 
 # ── LLM calls ─────────────────────────────────────────────────────────────────
 
-def _haiku_still_valid(last_insight: dict, summary: dict) -> bool:
-    """Ask the fast model if the previous insight is still actionable given the current state."""
+def _fast_still_valid(last_insight: dict, summary: dict) -> bool:
+    """Pregunta al modelo rápido si el insight anterior sigue siendo accionable con el estado actual."""
     prev_body      = last_insight.get("body", "")
     runway         = summary.get("cash_flow_runway") or {}
     health_status  = runway.get("health_status", "unknown")
@@ -174,13 +184,13 @@ The insight is NOT still valid if health_status changed or commitment_gap change
         return False
 
 
-def _sonnet_generate(
+def _generate_insight(
     summary: dict,
     last_insight: dict | None,
     trigger_reason: str,
     milestones: list[dict] | None = None,
 ) -> dict:
-    """Ask Sonnet to generate a title+body coaching insight."""
+    """Genera el insight (title+body) con el modelo de razonamiento."""
     runway    = summary.get("cash_flow_runway") or {}
     ctx       = summary.get("financial_context") or {}
     burn_rate = summary.get("burn_rate") or {}
@@ -305,6 +315,7 @@ Generá la tarjeta de coaching:
         [{"role": "user", "content": user}],
         system=system,
         max_tokens=512,
+        model=_insight_model(),
     ).strip()
     if raw.startswith("```"):
         raw = raw.split("```")[1]
@@ -349,12 +360,12 @@ def run_insight_refresh(*, trigger: str = "scheduled", api: "RailsHttpAdapter | 
 
     # Fast validity gate (only if previous insight exists)
     if last_insight and trigger == "scheduled":
-        still_valid = _haiku_still_valid(last_insight, summary)
+        still_valid = _fast_still_valid(last_insight, summary)
         if still_valid:
             logger.info("[insight] fast model confirmed previous insight still valid — skipping.")
             return
 
-    result = _sonnet_generate(summary, last_insight, reason, milestones)
+    result = _generate_insight(summary, last_insight, reason, milestones)
 
     runway         = summary.get("cash_flow_runway") or {}
     commitment_gap = runway.get("commitment_gap", 0) or 0
