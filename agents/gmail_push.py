@@ -266,6 +266,23 @@ def _build_tool_map(account_id: int) -> dict:
             logger.warning("[GmailPush] get_categories error: %s", e)
             return {"ok": False, "error": str(e)}
 
+    def get_classification_hints(inp: dict) -> dict:
+        merchant = (inp.get("merchant") or "").strip()
+        if not merchant:
+            return {"ok": False, "error": "merchant requerido"}
+        try:
+            r = httpx.get(
+                f"{API_BASE_URL}/api/v1/transactions/classification_hints",
+                headers=headers,
+                params={"merchant": merchant},
+                timeout=15,
+            )
+            r.raise_for_status()
+            return {"ok": True, **(r.json().get("data") or {})}
+        except Exception as e:
+            logger.warning("[GmailPush] get_classification_hints error: %s", e)
+            return {"ok": False, "error": str(e)}
+
     def create_transaction(inp: dict) -> dict:
         try:
             payload = _normalize_transaction_payload(inp)
@@ -332,7 +349,11 @@ def _build_tool_map(account_id: int) -> dict:
             logger.error("[GmailPush] create_transaction error: %s", e)
             return {"ok": False, "error": str(e)}
 
-    return {"get_categories": get_categories, "create_transaction": create_transaction}
+    return {
+        "get_categories": get_categories,
+        "get_classification_hints": get_classification_hints,
+        "create_transaction": create_transaction,
+    }
 
 
 TOOLS = [
@@ -340,6 +361,22 @@ TOOLS = [
         "name": "get_categories",
         "description": "Devuelve categorías y subcategorías disponibles. Usala antes de create_transaction para elegir subcategory_code.",
         "input_schema": {"type": "object", "properties": {}},
+    },
+    {
+        "name": "get_classification_hints",
+        "description": (
+            "Devuelve el historial de clasificación del usuario para un comercio: candidates con "
+            "subcategory_code, count, share y typical_hours, más dominant (ya calculado por la API) "
+            "cuando el patrón es consistente. Llamala ANTES de clasificar cada transacción, "
+            "pasando el nombre del comercio tal como aparece en el correo."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "merchant": {"type": "string", "description": "Nombre del comercio del correo, ej: 'BOLD CAMILO 1789'"},
+            },
+            "required": ["merchant"],
+        },
     },
     {
         "name": "create_transaction",
@@ -383,8 +420,14 @@ Reglas críticas:
 - SIEMPRE incluir metadata.raw_text y metadata.subject con el texto fuente relevante.
 - source SIEMPRE es "gmail".
 - Si menciona débito/Nequi/transferencia: payment_source="debit".
-- Siempre intenta asignar subcategory_code con get_categories.
-  Si la subcategoría es clara, confirmed; si no, pending o sin subcategory_code para que aparezca en revisión.
+- Clasificación con memoria de patrones — el historial del usuario decide, no tu intuición:
+  1. Antes de clasificar, llamá get_classification_hints con el comercio tal como aparece en el correo (ej: "BOLD CAMILO 1789").
+  2. Si la respuesta trae dominant → usá ese subcategory_code, status="confirmed" y metadata.classification_source="pattern". No preguntes.
+  3. Si trae 2+ candidates sin dominant → status="pending", subcategory_code del primer candidate,
+     metadata.suggested_subcategories=[códigos de los 2 primeros] y metadata.classification_source="agent".
+     Las typical_hours son evidencia: si la hora del correo coincide con las de un candidate, ese va primero.
+  4. Si samples=0 → usá get_categories y tu mejor juicio; metadata.classification_source="agent".
+     Subcategoría clara → confirmed; con duda real → pending o sin subcategory_code para que aparezca en revisión.
 - Davivienda puede enviar correos solo en HTML o snippets con asunto "DAVIVIENDA".
   Si el texto trae "Valor Transacción", fecha y monto, es financiero aunque el cuerpo sea breve.
 - No tienes herramienta de mensajería directa. create_transaction avisará a la app cuando cree una transacción
