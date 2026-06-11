@@ -10,7 +10,6 @@ from ports.llm_provider import LlmProviderPort
 
 load_dotenv()
 
-DEFAULT_PROVIDER = "kimi"
 DEFAULT_MODELS = {
     "anthropic": "claude-sonnet-4-6",
     "openai": "gpt-4.1-mini",
@@ -43,7 +42,10 @@ def resolve_llm_provider_name() -> str:
         return "openai"
     if _env_first("ANTHROPIC_API_KEY"):
         return "anthropic"
-    return DEFAULT_PROVIDER
+    raise ValueError(
+        "No LLM provider configured: set LLM_PROVIDER or provide an API key "
+        "(DEEPSEEK_API_KEY, KIMI_API_KEY, OPENAI_API_KEY or ANTHROPIC_API_KEY)."
+    )
 
 
 def resolve_llm_model(*, env_var: str | None = None) -> str:
@@ -61,7 +63,7 @@ def resolve_llm_model(*, env_var: str | None = None) -> str:
     if provider == "anthropic":
         return _env_first("CLAUDE_MODEL") or DEFAULT_MODELS["anthropic"]
 
-    return DEFAULT_MODELS.get(provider, DEFAULT_MODELS[DEFAULT_PROVIDER])
+    return DEFAULT_MODELS[provider]
 
 
 def build_llm_provider() -> LlmProviderPort:
