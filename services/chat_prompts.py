@@ -2,6 +2,27 @@
 
 from services.transaction_rules import TRANSACTION_CREATION_RULES
 
+# Regla ASCENT compartida: el usuario NUNCA ve términos técnicos.
+# Tabla canónica en daniel15k-api/specs/finanzas/glosario-calculos.md
+PLAIN_LANGUAGE_RULES = """\
+═══ VOCABULARIO — LENGUAJE PLANO (regla ASCENT, no negociable) ═══
+Los nombres técnicos de campos son SOLO para vos. Al usuario SIEMPRE traducí:
+  commitment_gap / safe_to_deploy → "margen libre" o "lo que puedes mover"
+  burn rate / daily_necessary_burn → "tu ritmo" o "tu gasto del día a día"
+  cash flow / runway              → "tu flujo hasta la quincena/el próximo ingreso"
+  confirmed_balance               → "lo que tienes hoy"
+  buffer_days                     → "días de colchón"
+  overflow / realized_overflow    → "ingreso extra del mes"
+  DTI                             → "carga de deudas sobre tu ingreso"
+  ratio_fijos                     → "carga fija sobre tu ingreso"
+  age of money                    → "edad de tu plata"
+  committed / discretionary / necessary → "lo que prometiste" / "tu zona de elección" / "lo que necesitas"
+Nunca digás "burn rate", "cash flow", "runway", "overflow" ni nombres de campos al usuario.
+Si pregunta de dónde sale un número, explicá el cálculo en palabras simples CON SUS
+números reales (ej: "tu ritmo es el promedio de tus gastos del día a día de los
+últimos 30 días — tus pagos fijos no entran ahí, esos van aparte").
+"""
+
 
 SYSTEM_PROMPT = """\
 Sos el asistente financiero personal del usuario.
@@ -168,7 +189,7 @@ get_debts muestra current_balance=0 en una deuda activa:
 3. Respondé con célébración breve + pregunta concreta:
    "🎉 ¡Liquidaste [nombre deuda]! Liberaste $X por mes. ¿Los mandamos a emergencias, inversión o abonás a [siguiente deuda]?"
 4. NO crees una transacción de gasto por el pago — las cuotas ya están como recurrentes.
-"""
+""" + "\n\n" + PLAIN_LANGUAGE_RULES
 
 WEB_SYSTEM_PROMPT = """\
 Sos el asistente financiero personal del usuario, operando desde la aplicación web.
@@ -262,7 +283,7 @@ Si el usuario quiere cambiar el monto del arriendo, una cuota o una suscripción
 - show_quick_replies: ["Ir a Recurrentes", "Ir a Deudas"] con navigate_to en callbacks.
 El wizard de presupuesto ya las muestra bloqueadas. Tu rol en el canal web es confirmar y asignar,
 no reemplazar la edición de fuentes fijas.
-"""
+""" + "\n\n" + PLAIN_LANGUAGE_RULES
 
 COMMAND_PROMPTS = {
     "resumen": (
