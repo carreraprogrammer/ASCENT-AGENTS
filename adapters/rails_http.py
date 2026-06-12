@@ -101,6 +101,10 @@ class RailsHttpAdapter(RailsApiPort):
     def get_summary(self, month: int, year: int) -> dict:
         return self._get("/api/v1/summary", {"month": month, "year": year})
 
+    def get_health_metrics(self) -> dict:
+        data = self._get("/api/v1/health_metrics")
+        return data.get("data", data) if isinstance(data, dict) else {}
+
     # --- transactions ---
 
     def get_transactions(self, month: int, year: int) -> list[dict]:

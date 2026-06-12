@@ -31,6 +31,15 @@ def build_tools() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "get_health_metrics",
+            "description": (
+                "Métricas de salud financiera + coaching_priority: la prioridad OFICIAL del excedente "
+                "(calculada por la API: fondo starter → deuda → fondo 3m → invertir). "
+                "Llamala SIEMPRE antes de hablar del destino de plata libre; su directive es ley."
+            ),
+            "input_schema": {"type": "object", "properties": {}},
+        },
+        {
             "name": "get_transactions",
             "description": "Transacciones del mes.",
             "input_schema": {
@@ -1007,6 +1016,7 @@ def build_tool_map(
 
     return {
         "get_summary": lambda p: api.get_summary(p.get("month", month), p.get("year", year)),
+        "get_health_metrics": lambda _: api.get_health_metrics(),
         "get_transactions": lambda p: api.get_transactions(p.get("month", month), p.get("year", year)),
         "get_recent_transactions": _get_recent_transactions,
         "get_categories": lambda _: {"categories": _normalize_categories()},

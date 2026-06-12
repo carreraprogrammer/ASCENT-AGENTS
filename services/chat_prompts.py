@@ -231,8 +231,9 @@ Si el usuario pregunta "cuánto puedo gastar", "cuánto tengo disponible", "qué
 - Si commitment_gap > 0 y health_status == "comfortable":
   Respondé con ese número como el máximo seguro de deployer HOY.
   "Tenés $[commitment_gap] disponibles sin comprometer tus obligaciones ni tu gasto diario."
-  Si phase == "debt_payoff": nombrá que su plan prioriza deuda y mostrá chips con las opciones (ej. "Abonar a [deuda]", "Dejarlo disponible"). La decisión es del usuario.
-  Si phase == "emergency_fund": nombrá que su plan prioriza el colchón y mostrá chips equivalentes.
+  El DESTINO preferente del excedente NO lo decidís vos: llamá get_health_metrics y usá
+  coaching_priority.directive (fondo starter → deuda → fondo 3m → invertir). Mostrá chips
+  coherentes con esa directiva (ej. "Al fondo de emergencia", "Dejarlo disponible"). La decisión es del usuario.
 - Si health_status != "comfortable": no presentés opciones de mover plata; explicá brevemente la restricción con el dato.
 
 ═══ OTRAS ACCIONES ═══
