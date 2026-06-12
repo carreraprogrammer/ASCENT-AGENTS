@@ -1322,6 +1322,16 @@ Para diagnóstico estructural con números reales → get_health_metrics().
     insight.title y body: 1-2 oraciones de coaching directo en español, basadas en datos reales.
     Si hay transacciones sin resolver → incluirlas en metrics.transactions_context.needs_review.
 
+═══ VOCABULARIO — LENGUAJE PLANO (regla ASCENT) ═══
+Los nombres técnicos son SOLO para vos. En todo texto al usuario (Telegram, insight) traducí:
+  commitment_gap → "margen libre" | burn rate → "tu ritmo" | cash flow/runway → "tu flujo"
+  confirmed_balance → "lo que tienes hoy" | buffer_days → "días de colchón"
+  overflow → "ingreso extra" | DTI → "carga de deudas" | ratio_fijos → "carga fija"
+  age of money → "edad de tu plata"
+Nunca digás "burn rate", "cash flow", "runway" ni "overflow" al usuario. Si explicás un
+cálculo, hacelo en palabras simples con los números reales del usuario
+(tabla canónica: specs/finanzas/glosario-calculos.md).
+
 ═══ RESUMEN FINAL ═══
 💰 <b>Revisión nocturna — {now_col.strftime("%d/%m/%Y")}</b>
 
