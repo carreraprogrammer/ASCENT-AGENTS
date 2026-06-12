@@ -130,6 +130,21 @@ def _get_milestones(limit: int = 5, headers_fn=build_auth_headers) -> list[dict]
         return []
 
 
+def _get_coaching_priority(headers_fn=build_auth_headers) -> dict | None:
+    """Prioridad oficial del excedente, calculada por la API (fuente única de verdad)."""
+    try:
+        r = httpx.get(
+            f"{BASE_URL}/api/v1/health_metrics",
+            headers=headers_fn(),
+            timeout=15,
+        )
+        r.raise_for_status()
+        return (r.json().get("data") or {}).get("coaching_priority")
+    except Exception as exc:
+        logger.warning("[insight] health_metrics fetch failed: %s", exc)
+        return None
+
+
 def _get_latest_insight(headers_fn=build_auth_headers) -> dict | None:
     r = httpx.get(
         f"{BASE_URL}/api/v1/agent_insights/latest",
@@ -189,6 +204,7 @@ def _generate_insight(
     last_insight: dict | None,
     trigger_reason: str,
     milestones: list[dict] | None = None,
+    coaching_priority: dict | None = None,
 ) -> dict:
     """Genera el insight (title+body) con el modelo de razonamiento."""
     runway    = summary.get("cash_flow_runway") or {}
@@ -196,6 +212,15 @@ def _generate_insight(
     burn_rate = summary.get("burn_rate") or {}
     debts     = summary.get("debts") or {}
     overflow  = summary.get("overflow_status") or {}
+
+    priority_block = ""
+    if coaching_priority:
+        priority_block = (
+            "\nPRIORIDAD DEL EXCEDENTE (calculada por la API — es LEY, no la contradigas):\n"
+            f"- código: {coaching_priority.get('code')}\n"
+            f"- directiva: {coaching_priority.get('directive')}\n"
+            f"- razón: {coaching_priority.get('reason')}\n"
+        )
 
     prev_block = ""
     if last_insight:
@@ -249,6 +274,7 @@ SELECCIÓN DE KIND:
 - "tip" — observación de coaching general (por defecto)
 
 GUARDARRAÍLES POR ESTADO:
+- Si los datos traen PRIORIDAD DEL EXCEDENTE, todo destino de plata que menciones debe coincidir con esa directiva. Nunca la contradigas.
 - comfortable: podés mostrar la opción de mover plata si hay excedente real (como condicional, decisión del usuario)
 - warning: mencioná el margen ajustado primero, sin sugerir deploys
 - critical: NO recomiendes mover ninguna plata
@@ -301,7 +327,7 @@ GASTO POR CATEGORÍA:
 {json.dumps(burn_summary, ensure_ascii=False, indent=2)}
 
 DEUDAS: saldo total={_fmt(debts.get('total_balance', 0))}, pago mensual={_fmt(debts.get('monthly_payments', 0))}
-{milestones_block}{prev_block}
+{priority_block}{milestones_block}{prev_block}
 Generá la tarjeta de coaching:
 {{
   "kind": "tip|congratulation|alert|proposal|achievement",
@@ -365,7 +391,8 @@ def run_insight_refresh(*, trigger: str = "scheduled", api: "RailsHttpAdapter | 
             logger.info("[insight] fast model confirmed previous insight still valid — skipping.")
             return
 
-    result = _generate_insight(summary, last_insight, reason, milestones)
+    coaching_priority = _get_coaching_priority(headers_fn=headers_fn)
+    result = _generate_insight(summary, last_insight, reason, milestones, coaching_priority)
 
     runway         = summary.get("cash_flow_runway") or {}
     commitment_gap = runway.get("commitment_gap", 0) or 0
