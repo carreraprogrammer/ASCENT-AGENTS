@@ -44,6 +44,18 @@ def _make_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
+    # ── Renovación del watch de Gmail — diario 06:00 UTC ─────────────────────
+    # El watch de Gmail dura ~7 días. Sin renovarlo, el push muere en silencio y
+    # solo el nocturno (por búsqueda de fecha) recupera correos. Corre a diario y
+    # Rails renueva los que expiran en < 2 días.
+    scheduler.add_job(
+        func=_run_gmail_watch_renewal,
+        trigger=CronTrigger(hour=6, minute=0),
+        id="gmail_watch_renewal",
+        name="Renovación watch de Gmail",
+        replace_existing=True,
+    )
+
     # ── Keep-alive Rails API (cada 5 min) — evita cold start en Railway ──────
     scheduler.add_job(
         func=_ping_rails,
@@ -54,6 +66,20 @@ def _make_scheduler() -> AsyncIOScheduler:
     )
 
     return scheduler
+
+
+async def _run_gmail_watch_renewal() -> None:
+    """Pide a Rails que renueve los gmail.watch() próximos a expirar."""
+    from adapters.rails_http import RailsHttpAdapter
+
+    api = RailsHttpAdapter()
+    try:
+        result = await asyncio.get_event_loop().run_in_executor(
+            None, api.renew_gmail_watches
+        )
+        logger.info("[gmail_watch_renewal] %s", result)
+    except Exception as e:
+        logger.error("[gmail_watch_renewal] error: %s", e)
 
 
 async def _run_nightly_all_accounts() -> None:
