@@ -96,6 +96,17 @@ class RailsHttpAdapter(RailsApiPort):
         resp.raise_for_status()
         return resp.json().get("data", [])
 
+    def renew_gmail_watches(self) -> dict:
+        """
+        Renueva los gmail.watch() próximos a expirar. Usa service headers sin
+        X-Account-Id. Sin esto el watch expira cada ~7 días y el push muere
+        en silencio. Devuelve {candidates, renewed, failed}.
+        """
+        url = f"{BASE_URL}/api/v1/agent/gmail/renew_watches"
+        resp = httpx.post(url, headers=build_service_headers(), timeout=TIMEOUT)
+        resp.raise_for_status()
+        return resp.json().get("data", {})
+
     # --- summary ---
 
     def get_summary(self, month: int, year: int) -> dict:
