@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from typing import Callable
 
 import httpx
@@ -9,6 +10,12 @@ import httpx
 from ports.llm_provider import LlmProviderPort
 
 logger = logging.getLogger(__name__)
+
+# El proveedor (deepseek u otro compatible) ocasionalmente corta la conexión a media
+# respuesta (RemoteProtocolError) o expira. Reintentamos con backoff para que un fallo
+# transitorio de red no se le presente al usuario como "se trabó".
+_TRANSIENT_RETRIES = 2
+_TRANSIENT_BACKOFF = 1.5
 
 
 def _to_openai_tools(tools: list[dict]) -> list[dict]:
@@ -59,6 +66,27 @@ class OpenAICompatibleLlmProvider(LlmProviderPort):
             timeout=60,
         )
 
+    def _post_chat(self, payload: dict) -> httpx.Response:
+        """POST a /chat/completions reintentando ante errores transitorios de red."""
+        last_exc: Exception | None = None
+        for attempt in range(_TRANSIENT_RETRIES + 1):
+            try:
+                return self._client.post("/chat/completions", json=payload)
+            except httpx.TransportError as exc:
+                last_exc = exc
+                if attempt < _TRANSIENT_RETRIES:
+                    wait = _TRANSIENT_BACKOFF * (2 ** attempt)
+                    logger.warning(
+                        "[%s_llm] transient error (%s), retry %d/%d in %.1fs",
+                        self._provider_name,
+                        type(exc).__name__,
+                        attempt + 1,
+                        _TRANSIENT_RETRIES,
+                        wait,
+                    )
+                    time.sleep(wait)
+        raise last_exc  # type: ignore[misc]
+
     def run_agent(
         self,
         *,
@@ -89,7 +117,7 @@ class OpenAICompatibleLlmProvider(LlmProviderPort):
             else:
                 payload["thinking"] = {"type": "disabled"}
 
-            response = self._client.post("/chat/completions", json=payload)
+            response = self._post_chat(payload)
             try:
                 response.raise_for_status()
             except httpx.HTTPStatusError as exc:

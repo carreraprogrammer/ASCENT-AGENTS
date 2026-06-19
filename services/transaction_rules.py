@@ -69,16 +69,27 @@ AMBIGUITY_RULES = """\
 
 
 CREDIT_CARD_RULES = """\
-═══ REGLA — TARJETA DE CRÉDITO ═══
-Compras con TC: registrar con create_transaction y payment_source="credit_card".
-El gasto se imputa al momento de la compra, como cualquier otro gasto confirmado.
+═══ REGLA — DEUDA vs TARJETA DE CRÉDITO (NO las confundas) ═══
+Son cosas opuestas. La distinción es semántica y vale para cualquier banco:
 
-Abonos/pagos al banco (email o mensaje dice "Abono TC", "Pago TC", "Pago tarjeta",
-"Descuento Pago Tarjeta de Crédito", "se han abonado", "pago mínimo", o similar):
-NO crear transacción — es una transferencia entre banco y tarjeta, no un gasto nuevo.
+1) PAGO / ABONO / CUOTA DE UN CRÉDITO O PRÉSTAMO (libre inversión, vehículo, hipoteca,
+   crédito de consumo; textos tipo "Pago a Crédito", "Abono a crédito", "Cuota crédito",
+   "Pago de préstamo/obligación"):
+   Es plata REAL saliendo de tu cuenta para servir una deuda → SÍ registrar como gasto con
+   create_transaction, payment_source="debit", subcategoría "creditos". El backend lo vincula
+   a la deuda / obligación recurrente automáticamente. NO lo ignores.
 
-Cuotas de deuda diferida en TC (celular a cuotas, etc.): registrar con payment_source="debit"
-cuando sea plata saliendo de la cuenta de ahorros para servir una deuda ya capturada.
+2) PAGO DE LA TARJETA DE CRÉDITO (pagar el estado de cuenta del plástico; textos que dicen
+   explícitamente "tarjeta de crédito" o "TC": "Pago Tarjeta de Crédito", "Pago TC",
+   "Abono TC", "pago mínimo de la tarjeta"):
+   Es una transferencia entre cuentas propias, no un gasto nuevo → NO crear transacción.
+
+Regla de oro: si es un pago AL plástico (menciona "tarjeta de crédito"/"TC") → ignorar.
+Si es un pago A un crédito o préstamo → registrar como gasto debit. "crédito" solo (sin
+"tarjeta") significa préstamo/deuda, NO tarjeta.
+
+3) COMPRAS con tarjeta de crédito: registrar con payment_source="credit_card".
+   El gasto se imputa al momento de la compra, como cualquier otro gasto confirmado.
 """
 
 
