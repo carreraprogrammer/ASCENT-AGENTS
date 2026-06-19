@@ -166,6 +166,30 @@ def _force_pending_email(email: dict) -> bool:
     return should_force_pending(_email_text(email))
 
 
+def _fetch_today_transactions(account_id: int) -> list[dict]:
+    """Transacciones ya registradas hoy — contexto para que el agente NO duplique
+    un mismo pago que llega en dos correos distintos (ej: notificación del banco +
+    confirmación del operador/PSE) con remitentes o textos diferentes."""
+    from agents.nightly import _flatten_transaction
+
+    now_col = datetime.now(COLOMBIA_TZ)
+    try:
+        resp = httpx.get(
+            f"{API_BASE_URL}/api/v1/transactions",
+            headers=build_auth_headers(str(account_id)),
+            params={"month": now_col.month, "year": now_col.year, "page": 1, "per_page": 100},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        rows = resp.json().get("data", [])
+    except Exception as e:
+        logger.warning("[GmailPush] fetch today transactions error: %s", e)
+        return []
+
+    today = now_col.strftime("%Y-%m-%d")
+    return [t for t in (_flatten_transaction(r) for r in rows) if t.get("date") == today]
+
+
 def _get_gmail_token(account_id: int) -> tuple[str | None, list[str]]:
     """Obtiene access_token fresco y bank_senders desde Rails."""
     try:
@@ -416,6 +440,12 @@ Recibirás uno o más correos de Gmail. Tu tarea:
 3. Si NO es financiero (publicidad, newsletters, confirmaciones de cuenta): ignorar completamente.
 
 Reglas críticas:
+- DEDUPLICACIÓN SEMÁNTICA: un mismo pago suele generar DOS correos (banco + operador/PSE,
+  o débito + comprobante) con remitentes y textos distintos pero el mismo monto. Antes de
+  registrar, revisá la lista "TRANSACCIONES YA REGISTRADAS HOY" del mensaje: si el movimiento
+  ya está ahí (mismo monto y misma naturaleza, aunque el concepto difiera), NO lo dupliques.
+  El source_event_id solo evita reprocesar el MISMO correo; no detecta el mismo pago en dos
+  correos distintos — eso es tu responsabilidad.
 - SIEMPRE incluir metadata.source_event_id = id del correo (campo "id" de cada email).
 - SIEMPRE incluir metadata.raw_text y metadata.subject con el texto fuente relevante.
 - source SIEMPRE es "gmail".
@@ -477,6 +507,23 @@ def run_gmail_push(account_id: int, history_id: str) -> None:
         for e in emails
     )
     initial_message = f"Procesa estos {len(emails)} correo(s) de Gmail:\n\n{emails_text}"
+
+    today_txns = _fetch_today_transactions(account_id)
+    if today_txns:
+        already = "\n".join(
+            f"- id={t['id']} {t.get('type')} ${t.get('amount')} {(t.get('concept') or '').strip()}"
+            for t in today_txns
+        )
+        initial_message += (
+            "\n\n═══ TRANSACCIONES YA REGISTRADAS HOY (no las dupliques) ═══\n"
+            f"{already}\n\n"
+            "Un mismo pago suele llegar en DOS correos distintos (ej: notificación del banco + "
+            "confirmación del operador/PSE, o débito de cuenta + comprobante) con remitentes y "
+            "textos diferentes pero el MISMO monto. Si el movimiento de un correo ya está en la "
+            "lista de arriba (mismo monto y misma naturaleza, aunque el concepto difiera), NO lo "
+            "registres de nuevo. Lo mismo aplica entre los correos de este lote: si dos describen "
+            "el mismo pago, registralo una sola vez."
+        )
 
     tool_map = _build_tool_map(account_id)
     provider = build_llm_provider()
