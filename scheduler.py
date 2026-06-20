@@ -11,6 +11,7 @@ import logging
 import asyncio
 import os
 
+import httpx
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.events import EVENT_JOB_ERROR
@@ -21,6 +22,19 @@ from apscheduler.events import EVENT_JOB_ERROR
 logger = logging.getLogger(__name__)
 
 _scheduler: AsyncIOScheduler | None = None
+
+
+def _is_reportable(exc: Exception) -> bool:
+    """Decide si un error de un loop por-cuenta merece ir al debugger.
+
+    Un 4xx en los endpoints internos (típicamente 404 por cuenta sin Delegation /
+    mal provisionada, o 403 por scope) NO es un bug del sistema: es una cuenta que
+    no está lista para el agente. Reportarlo cada noche solo genera ruido. Solo
+    reportamos errores reales (5xx, fallas de red, bugs de Python).
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code >= 500
+    return True
 
 
 def _make_scheduler() -> AsyncIOScheduler:
@@ -136,6 +150,12 @@ async def _run_nightly_all_accounts() -> None:
             logger.info("[nightly] account_id=%s — completado OK.", account_id)
 
         except Exception as e:
+            if not _is_reportable(e):
+                logger.warning(
+                    "[nightly] account_id=%s (%s) — %s; cuenta sin delegación/mal provisionada, se omite sin reportar al debugger.",
+                    account_id, account_name, e,
+                )
+                continue
             logger.error(
                 "[nightly] account_id=%s (%s) — error: %s",
                 account_id, account_name, e,
@@ -173,6 +193,12 @@ def _run_insight_all_accounts() -> None:
             run_insight_refresh(api=api)
             logger.info("[insight] account_id=%s — OK.", account_id)
         except Exception as e:
+            if not _is_reportable(e):
+                logger.warning(
+                    "[insight] account_id=%s (%s) — %s; cuenta sin delegación/mal provisionada, se omite sin reportar al debugger.",
+                    account_id, account_name, e,
+                )
+                continue
             logger.error("[insight] account_id=%s (%s) — error: %s", account_id, account_name, e)
             try:
                 from services.python_error_notifier import capture
