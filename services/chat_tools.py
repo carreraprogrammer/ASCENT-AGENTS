@@ -111,7 +111,12 @@ def build_tools() -> list[dict[str, Any]]:
         },
         {
             "name": "create_sinking_fund",
-            "description": "Crea un bolsillo para reservar dinero hacia un propósito. Úsalo cuando el usuario habla de un bolsillo que no existe todavía.",
+            "description": (
+                "Crea un bolsillo para reservar dinero hacia un GASTO FUTURO puntual (SOAT, "
+                "mantenimiento, impuestos). NO lo uses para metas de ahorro como el fondo de "
+                "emergencia — para eso usá create_savings_goal. El saldo se llena registrando "
+                "transacciones con sinking_fund_id, no al crearlo (empieza en 0)."
+            ),
             "input_schema": {
                 "type": "object",
                 "properties": {
@@ -119,7 +124,6 @@ def build_tools() -> list[dict[str, Any]]:
                     "monthly_contribution": {"type": "integer"},
                     "target_amount": {"type": "integer"},
                     "target_date": {"type": "string", "description": "Fecha ISO 8601 YYYY-MM-DD."},
-                    "current_balance": {"type": "integer"},
                     "budget_category": {"type": "string"},
                     "planned_expense_id": {"type": "integer"},
                     "notes": {"type": "string"},
@@ -164,6 +168,54 @@ def build_tools() -> list[dict[str, Any]]:
                         "type": "integer",
                         "description": "Monto a retirar en COP. Si se omite, retira el saldo completo.",
                     },
+                },
+                "required": ["id"],
+            },
+        },
+        {
+            "name": "get_savings_goals",
+            "description": "Metas de ahorro activas (ej. fondo de emergencia). Devuelve current_amount (lo acumulado), target_amount (la meta) y monthly_contribution.",
+            "input_schema": {"type": "object", "properties": {}, "required": []},
+        },
+        {
+            "name": "create_savings_goal",
+            "description": (
+                "Crea una META DE AHORRO (fondo de emergencia, ahorro para algo grande). Es lo que "
+                "muestra el dashboard como 'fondo de emergencia'. Úsalo solo si la meta no existe ya "
+                "(revisá con get_savings_goals primero). NO inventes el target: derivalo del plan/estrategia "
+                "del usuario o preguntale; no impongas reglas genéricas tipo '3 meses'."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "target_amount": {"type": "integer"},
+                    "current_amount": {"type": "integer", "description": "Lo ya acumulado. En una meta nueva normalmente 0."},
+                    "target_date": {"type": "string", "description": "Fecha ISO 8601 YYYY-MM-DD."},
+                    "monthly_contribution": {"type": "integer"},
+                    "priority": {"type": "integer"},
+                },
+                "required": ["name"],
+            },
+        },
+        {
+            "name": "update_savings_goal",
+            "description": (
+                "Actualiza una meta de ahorro existente. USÁ ESTO para registrar un aporte: sumá el monto "
+                "aportado a current_amount (leé el valor actual con get_savings_goals y sumá). También para "
+                "ajustar target_amount, monthly_contribution o status."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "name": {"type": "string"},
+                    "target_amount": {"type": "integer"},
+                    "current_amount": {"type": "integer", "description": "Nuevo total acumulado (no el delta)."},
+                    "target_date": {"type": "string", "description": "Fecha ISO 8601 YYYY-MM-DD."},
+                    "monthly_contribution": {"type": "integer"},
+                    "priority": {"type": "integer"},
+                    "status": {"type": "string", "description": "active | achieved | paused"},
                 },
                 "required": ["id"],
             },
@@ -1031,6 +1083,9 @@ def build_tool_map(
         "create_sinking_fund": lambda p: _post("/api/v1/sinking_funds", p),
         "update_sinking_fund": lambda p: _patch(f"/api/v1/sinking_funds/{p.pop('id')}", p),
         "withdraw_sinking_fund": lambda p: _post(f"/api/v1/sinking_funds/{p['id']}/withdraw", {"amount": p["amount"]} if p.get("amount") else {}),
+        "get_savings_goals": lambda _: api.get_savings_goals(),
+        "create_savings_goal": lambda p: _post("/api/v1/savings_goals", p),
+        "update_savings_goal": lambda p: _patch(f"/api/v1/savings_goals/{p.pop('id')}", p),
         "create_transactions": _create_transactions,
         "create_transaction": _create_transaction,
         "record_debt_payment": _record_debt_payment,

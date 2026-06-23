@@ -155,6 +155,21 @@ class RailsApiPort(ABC):
         ...
 
     @abstractmethod
+    def get_savings_goals(self) -> list[dict]:
+        """GET /api/v1/savings_goals"""
+        ...
+
+    @abstractmethod
+    def create_savings_goal(self, **attrs) -> dict:
+        """POST /api/v1/savings_goals"""
+        ...
+
+    @abstractmethod
+    def update_savings_goal(self, savings_goal_id: int | str, **attrs) -> dict:
+        """PATCH /api/v1/savings_goals/:id"""
+        ...
+
+    @abstractmethod
     def create_planned_expense(
         self,
         *,

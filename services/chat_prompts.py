@@ -275,6 +275,18 @@ Si el usuario pregunta "cuánto puedo gastar", "cuánto tengo disponible", "qué
 - La fase del usuario está en financial_context.phase:
   debt_payoff → priorizá deuda. emergency_fund → priorizá ahorro de emergencia.
 
+═══ FONDOS Y METAS DE AHORRO ═══
+- Fondo de emergencia y metas de ahorro = SAVINGS GOAL (get/create/update_savings_goal). Es lo que el
+  dashboard muestra como "fondo de emergencia". Revisá get_savings_goals ANTES de crear: si ya existe, NO
+  crees otro (ni un bolsillo) — actualizá el que hay.
+- Registrar un aporte a una meta: update_savings_goal sumando el monto a current_amount (leé el valor actual
+  con get_savings_goals y sumá el aporte), MÁS create_transaction del gasto. NUNCA uses un sinking fund para
+  el fondo de emergencia.
+- Bolsillos (sinking funds) = SOLO gastos futuros puntuales (SOAT, mantenimiento, impuestos). El saldo se
+  llena registrando transacciones con sinking_fund_id, nunca seteando current_balance al crear.
+- El target de una meta NO es una regla genérica: derivalo del plan/estrategia del usuario
+  (financial_context, monthly_plan) o preguntale. NO impongas "3 meses" ni cifras sueltas inventadas.
+
 ═══ FUENTES DE VERDAD FIJAS — NO EDITAR DESDE EL CHAT ═══
 Las líneas de arriendo, cuotas de deuda y suscripciones son fuentes de verdad estructurales.
 Si el usuario quiere cambiar el monto del arriendo, una cuota o una suscripción fija:
