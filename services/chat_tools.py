@@ -126,6 +126,14 @@ def build_tools() -> list[dict[str, Any]]:
                     "target_date": {"type": "string", "description": "Fecha ISO 8601 YYYY-MM-DD."},
                     "budget_category": {"type": "string"},
                     "planned_expense_id": {"type": "integer"},
+                    "auto_debit": {
+                        "type": "boolean",
+                        "description": "Si true, cada mes se aparta automáticamente la cuota de este bolsillo.",
+                    },
+                    "debit_day": {
+                        "type": "integer",
+                        "description": "Día del mes (1-28) del débito automático. Default 1.",
+                    },
                     "notes": {"type": "string"},
                     "active": {"type": "boolean"},
                 },
@@ -146,6 +154,14 @@ def build_tools() -> list[dict[str, Any]]:
                     "current_balance": {"type": "integer"},
                     "budget_category": {"type": "string"},
                     "planned_expense_id": {"type": "integer"},
+                    "auto_debit": {
+                        "type": "boolean",
+                        "description": "Si true, cada mes se aparta automáticamente la cuota de este bolsillo.",
+                    },
+                    "debit_day": {
+                        "type": "integer",
+                        "description": "Día del mes (1-28) del débito automático. Default 1.",
+                    },
                     "notes": {"type": "string"},
                     "active": {"type": "boolean"},
                 },
@@ -542,6 +558,10 @@ def build_tools() -> list[dict[str, Any]]:
                         "type": "boolean",
                         "description": "Si true, cada mes se aparta automáticamente la cuota del bolsillo de este plan.",
                     },
+                    "debit_day": {
+                        "type": "integer",
+                        "description": "Día del mes (1-28) en que se aplica el débito automático. Default 1.",
+                    },
                 },
                 "required": ["name", "amount_estimated", "target_date", "planning_type", "category_id", "subcategory_id"],
             },
@@ -567,6 +587,10 @@ def build_tools() -> list[dict[str, Any]]:
                     "auto_debit": {
                         "type": "boolean",
                         "description": "Si true, cada mes se aparta automáticamente la cuota del bolsillo de este plan.",
+                    },
+                    "debit_day": {
+                        "type": "integer",
+                        "description": "Día del mes (1-28) en que se aplica el débito automático. Default 1.",
                     },
                 },
                 "required": ["id"],

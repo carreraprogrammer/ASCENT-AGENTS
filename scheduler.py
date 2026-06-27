@@ -70,10 +70,13 @@ def _make_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
-    # ── Débitos automáticos a bolsillos — día 1 de cada mes, 08:00 UTC (3am COL) ─
+    # ── Débitos automáticos a bolsillos — DIARIO 08:00 UTC (3am COL) ─────────
+    # Corre a diario y Rails debita cada bolsillo el primer día >= su debit_day en
+    # que aún no tenga aporte ese mes (idempotente por mes). Así se respeta el día
+    # de débito configurado por bolsillo.
     scheduler.add_job(
         func=_run_auto_debits_all_accounts,
-        trigger=CronTrigger(day=1, hour=8, minute=0),
+        trigger=CronTrigger(hour=8, minute=0),
         id="monthly_auto_debits",
         name="Aportes automáticos a bolsillos",
         replace_existing=True,
