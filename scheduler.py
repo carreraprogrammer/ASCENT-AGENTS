@@ -70,6 +70,15 @@ def _make_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
+    # ── Débitos automáticos a bolsillos — día 1 de cada mes, 08:00 UTC (3am COL) ─
+    scheduler.add_job(
+        func=_run_auto_debits_all_accounts,
+        trigger=CronTrigger(day=1, hour=8, minute=0),
+        id="monthly_auto_debits",
+        name="Aportes automáticos a bolsillos",
+        replace_existing=True,
+    )
+
     # ── Keep-alive Rails API (cada 5 min) — evita cold start en Railway ──────
     scheduler.add_job(
         func=_ping_rails,
@@ -80,6 +89,31 @@ def _make_scheduler() -> AsyncIOScheduler:
     )
 
     return scheduler
+
+
+async def _run_auto_debits_all_accounts() -> None:
+    """
+    Día 1 de cada mes: por cada cuenta activa, dispara los aportes automáticos a
+    los bolsillos marcados con auto_debit. Idempotente del lado de Rails (por mes).
+    """
+    from adapters.rails_http import RailsHttpAdapter
+
+    admin_api = RailsHttpAdapter()
+    try:
+        accounts = admin_api.get_active_accounts()
+    except Exception as e:
+        logger.error("[auto_debits] No se pudo obtener la lista de cuentas: %s", e)
+        return
+
+    loop = asyncio.get_event_loop()
+    for account in accounts:
+        account_id = str(account["id"])
+        try:
+            api = RailsHttpAdapter(account_id=account_id)
+            result = await loop.run_in_executor(None, api.run_sinking_fund_auto_debits)
+            logger.info("[auto_debits] account_id=%s — %s", account_id, result)
+        except Exception as e:
+            logger.error("[auto_debits] account_id=%s — error: %s", account_id, e)
 
 
 async def _run_gmail_watch_renewal() -> None:

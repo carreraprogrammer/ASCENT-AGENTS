@@ -284,6 +284,11 @@ class RailsHttpAdapter(RailsApiPort):
     def update_sinking_fund(self, sinking_fund_id: int | str, **attrs) -> dict:
         return self._patch(f"/api/v1/sinking_funds/{sinking_fund_id}", attrs)
 
+    def run_sinking_fund_auto_debits(self) -> dict:
+        """POST /api/v1/sinking_funds/run_auto_debits — aporta la cuota mensual a los bolsillos auto_debit."""
+        result = self._post("/api/v1/sinking_funds/run_auto_debits", {})
+        return result.get("data", result) if isinstance(result, dict) else result
+
     # --- savings goals (metas de ahorro: fondo de emergencia, etc.) ---
 
     def get_savings_goals(self) -> list[dict]:
