@@ -538,6 +538,10 @@ def build_tools() -> list[dict[str, Any]]:
                     "category_id": {"type": "integer"},
                     "subcategory_id": {"type": "integer"},
                     "notes": {"type": "string"},
+                    "auto_debit": {
+                        "type": "boolean",
+                        "description": "Si true, cada mes se aparta automáticamente la cuota del bolsillo de este plan.",
+                    },
                 },
                 "required": ["name", "amount_estimated", "target_date", "planning_type", "category_id", "subcategory_id"],
             },
@@ -560,7 +564,23 @@ def build_tools() -> list[dict[str, Any]]:
                     "category_id": {"type": "integer"},
                     "subcategory_id": {"type": "integer"},
                     "notes": {"type": "string"},
+                    "auto_debit": {
+                        "type": "boolean",
+                        "description": "Si true, cada mes se aparta automáticamente la cuota del bolsillo de este plan.",
+                    },
                 },
+                "required": ["id"],
+            },
+        },
+        {
+            "name": "delete_planned_expense",
+            "description": (
+                "Borra un gasto planeado y su bolsillo asociado. Úsalo cuando el usuario quiera "
+                "eliminar un plan que ya no aplica. Si el bolsillo tenía saldo, primero retíralo."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {"id": {"type": "string"}},
                 "required": ["id"],
             },
         },
@@ -1116,6 +1136,7 @@ def build_tool_map(
         "delete_recurring_obligation": lambda p: _delete(f"/api/v1/recurring_obligations/{p['id']}"),
         "create_planned_expense": lambda p: _post("/api/v1/planned_expenses", p),
         "update_planned_expense": lambda p: _patch(f"/api/v1/planned_expenses/{p.pop('id')}", p),
+        "delete_planned_expense": lambda p: _delete(f"/api/v1/planned_expenses/{p['id']}"),
         "create_income_source": lambda p: _post("/api/v1/income_sources", p),
         "update_income_source": lambda p: _patch(f"/api/v1/income_sources/{p.pop('id')}", p),
         "delete_income_source": lambda p: _delete(f"/api/v1/income_sources/{p['id']}"),
