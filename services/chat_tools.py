@@ -173,6 +173,19 @@ def build_tools() -> list[dict[str, Any]]:
             },
         },
         {
+            "name": "delete_sinking_fund",
+            "description": (
+                "Desactiva (borra) un bolsillo que el usuario ya no necesita. El saldo NO se devuelve "
+                "automáticamente al flujo de caja: si el usuario quiere recuperar la plata, primero usá "
+                "withdraw_sinking_fund y después delete_sinking_fund."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {"id": {"type": "string", "description": "ID del sinking fund."}},
+                "required": ["id"],
+            },
+        },
+        {
             "name": "get_savings_goals",
             "description": "Metas de ahorro activas (ej. fondo de emergencia). Devuelve current_amount (lo acumulado), target_amount (la meta) y monthly_contribution.",
             "input_schema": {"type": "object", "properties": {}, "required": []},
@@ -1083,6 +1096,7 @@ def build_tool_map(
         "create_sinking_fund": lambda p: _post("/api/v1/sinking_funds", p),
         "update_sinking_fund": lambda p: _patch(f"/api/v1/sinking_funds/{p.pop('id')}", p),
         "withdraw_sinking_fund": lambda p: _post(f"/api/v1/sinking_funds/{p['id']}/withdraw", {"amount": p["amount"]} if p.get("amount") else {}),
+        "delete_sinking_fund": lambda p: _delete(f"/api/v1/sinking_funds/{p['id']}"),
         "get_savings_goals": lambda _: api.get_savings_goals(),
         "create_savings_goal": lambda p: _post("/api/v1/savings_goals", p),
         "update_savings_goal": lambda p: _patch(f"/api/v1/savings_goals/{p.pop('id')}", p),
