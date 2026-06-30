@@ -24,27 +24,37 @@ INBOUND_TRANSFER_RE = re.compile(
 
 
 SUBCATEGORY_REFERENCE = """\
-═══ SUBCATEGORÍAS VÁLIDAS ═══
+═══ CLASIFICACIÓN POR AGENCIA — 3 TIERS ═══
+
+Pregunta única para clasificar CUALQUIER gasto:
+  "Si mi situación financiera empeora, ¿qué margen de maniobra tengo sobre este gasto?"
+    → No puedo dejar de pagarlo sin incumplir una obligación   → committed
+    → Lo sigo necesitando aunque reduzca el monto (mínimo > 0)  → necessary
+    → Podría llevarlo a CERO en una crisis                      → discretionary (= "Flexible")
+
+═══ SUBCATEGORÍAS VÁLIDAS (category_code → subcategory_code) ═══
 
 committed (Comprometido):
   arriendo, creditos, seguros, servicios_publicos, colegiaturas
 
 necessary (Necesario):
-  mercado, gasolina, transporte, salud, ejercicio, celular
+  mercado, gasolina, transporte, salud, ejercicio, celular, herramientas
 
 discretionary (Flexible):
-  restaurantes, delivery, ocio, ropa, tecnologia, suscripciones
-
-investment (Inversión):
-  cursos, libros, suplementos, herramientas, ahorro_voluntario
-
-social (Social):
-  regalos, salidas, familia, donaciones
+  restaurantes, delivery, ocio, ropa, tecnologia, suscripciones, cursos, suplementos, social
 
 income (Ingreso):
   salario, freelance, reembolso, arriendo_recibido, otros_ingreso
 
 unknown: usá cuando la categoría no está clara — subcategory_code omitido (null)
+
+═══ NOTAS DEL MODELO (RFC-0001) ═══
+- Ya NO existen los tiers "investment" ni "social". El gasto relacional (regalos, salidas,
+  familia, amigos, donaciones) va a discretionary/social. El gasto "en uno mismo" cae en su
+  tier por la pregunta única: cursos/suplementos = discretionary; herramientas de trabajo = necessary.
+- AHORRO / INVERSIÓN-INSTRUMENTO (aporte a fondo de emergencia, aporte o retiro de bolsillo,
+  CDT, acciones, cripto) NO es un gasto. NO uses una categoría de gasto: usá las herramientas
+  de ahorro/metas (savings_goal / sinking_fund).
 """
 
 
@@ -53,15 +63,15 @@ AMBIGUITY_RULES = """\
 - Clasificar directamente si el contexto hace clara la subcategoría.
 - Preguntar SOLO cuando la diferencia de categoría conductual cambia el análisis y el contexto no lo resuelve.
   * Casos donde SE clasifica directamente (nunca preguntar):
-    - "Fui a restaurante con mis papás / familia / pareja / amigo" → social/salidas
+    - "Fui a restaurante con mis papás / familia / pareja / amigo" → discretionary/social
     - "Pagué el arriendo" → committed/arriendo
     - "Compré en el Éxito / tienda / supermercado" → necessary/mercado
     - "Tamales / comida / almuerzo" sin mención de persona → discretionary/restaurantes
-    - "74.000 cafetería con familia" → social/salidas
+    - "74.000 cafetería con familia" → discretionary/social
+    - "Pagué un curso online" → discretionary/cursos
   * Casos donde SÍ se pregunta:
-    - "Compré audífonos Sony" → ¿discretionary/tecnologia o investment/herramientas?
-    - "Pagué un curso online" → preguntar si no está claro si es inversión o ocio
-- Si el mensaje menciona otra persona (familia, amigo, pareja, nombre propio), la subcategoría social es implícita.
+    - "Compré audífonos Sony" → ¿necessary/herramientas (si es para trabajo) o discretionary/tecnologia (si es ocio)?
+- Si el mensaje menciona otra persona (familia, amigo, pareja, nombre propio), la subcategoría discretionary/social es implícita.
 - Para montos menores a 50.000 COP con contexto claro, no preguntar — clasificar directamente.
 - El usuario siempre puede cambiar la clasificación después.
 - Si vas a preguntar la categoría con botones inline, primero creá la transacción con tu mejor clasificación provisional o status="pending"; luego enviá botones con callback_data "cat:{txn_id}:{subcat_code}".
@@ -150,7 +160,7 @@ def quick_category_buttons(categories: list[dict], transaction_type: str | None 
     preferred = (
         ["salario", "freelance", "reembolso", "otros_ingreso"]
         if transaction_type == "income"
-        else ["restaurantes", "mercado", "transporte", "tecnologia", "salidas", "creditos"]
+        else ["restaurantes", "mercado", "transporte", "tecnologia", "social", "creditos"]
     )
     by_code = {
         sub.get("code"): sub
