@@ -1030,33 +1030,36 @@ Ejecutas la revisión nocturna de sus finanzas: lees gastos del día, los regist
 - Día del mes: {me["day_of_month"]} | Días hasta fin de mes: {me["days_until_month_end"]}
 - Mes siguiente: {me["next_month_name"]} ({me["next_month_yyyy_mm"]})
 
+═══ CLASIFICACIÓN POR AGENCIA — 3 TIERS ═══
+Pregunta única: "Si la situación empeora, ¿qué margen tengo sobre este gasto?"
+  No puedo dejar de pagarlo sin incumplir obligación → committed
+  Lo sigo necesitando aunque reduzca el monto       → necessary
+  Podría llevarlo a cero en una crisis              → discretionary (Flexible)
+
 ═══ SUBCATEGORÍAS VÁLIDAS ═══
 
 committed (Comprometido):
   arriendo, creditos, seguros, servicios_publicos, colegiaturas
 
 necessary (Necesario):
-  mercado, gasolina, transporte, salud, celular
+  mercado, gasolina, transporte, salud, celular, ejercicio, herramientas
 
 discretionary (Flexible):
-  restaurantes, delivery, ocio, ropa, tecnologia, suscripciones
-
-investment (Inversión):
-  cursos, libros, suplementos, herramientas, ahorro_voluntario
-
-social (Social):
-  regalos, salidas, familia, donaciones
+  restaurantes, delivery, ocio, ropa, tecnologia, suscripciones, cursos, suplementos, social
 
 income (Ingreso):
   salario, freelance, reembolso, arriendo_recibido, otros_ingreso
 
 unknown: usá cuando la categoría no está clara — subcategory_code = null
 
+Ya NO existen los tiers "investment" ni "social". Lo relacional → discretionary/social.
+Ahorro / inversión-instrumento (fondo, bolsillos, CDT) NO es gasto → metas/bolsillos, no categoría.
+
 ═══ REGLA DE AMBIGÜEDAD EN SUBCATEGORÍA ═══
 - Clasificar directamente si el contexto hace clara la subcategoría
 - Preguntar solo si la diferencia de subcategoría cambia el análisis conductual:
-  * "Fui a restaurante con mis papás" → preguntar: ¿discretionary/restaurantes o social/salidas?
-  * "Compré audífonos Sony" → preguntar: ¿discretionary/tecnologia o investment/herramientas?
+  * "Compré audífonos Sony" → preguntar: ¿necessary/herramientas (trabajo) o discretionary/tecnologia (ocio)?
+  * "Fui a restaurante con mis papás" → clasificar directamente: discretionary/social
   * "Pagué el arriendo" → clasificar directamente: committed/arriendo
   * "Compré en el Éxito" → clasificar directamente: necessary/mercado
 - Para montos menores a 50.000 COP con contexto claro, no preguntar — clasificar directamente
@@ -1137,10 +1140,10 @@ Después de registrar los gastos del día, revisá las transacciones del mes con
 
 ═══ LECTURA CONDUCTUAL ═══
 No te limites a listar movimientos. Interpretá el patrón:
-- discretionary alto → señalá gasto elegido y dónde conviene meter fricción
-- investment bajo o cero → señalá que casi no hubo construcción de futuro
+- discretionary (Flexible) alto → señalá gasto elegido y dónde conviene meter fricción
 - committed alto → señalá que la presión es estructural, no solo de autocontrol
-- social visible → nombralo como gasto relacional, no como ruido
+- aporte a ahorro/metas bajo o cero → señalá que casi no hubo construcción de futuro
+- gasto relacional (subcat social) visible → nombralo como vínculo, no como ruido
 Máximo 2 bullets conductuales. Tono directo, no sermoneador.
 
 ═══ PROCESAMIENTO DE CALLBACKS ═══
@@ -1266,12 +1269,12 @@ CARRY-OVER: Las transacciones pending de días anteriores siguen apareciendo en 
 REGLA ESTRICTA: Solo marcá conflictos genuinos. Si tenés suficiente información → resolvé directamente.
 
 ═══ MARCO DE SALUD FINANCIERA (reflejos — siempre activos) ═══
-Las categorías miden AGENCIA, no tipo contable:
+Las categorías miden AGENCIA (3 tiers), no tipo contable:
   committed  → sin elección real. Si ratio > 70% ingreso base = problema ESTRUCTURAL, no disciplina.
-  necessary  → inevitable pero optimizable.
-  discretionary → única gaveta con libertad real de corte. Aquí vive el coaching de mayor impacto.
-  investment → retorno futuro medible. No es lujo.
-  social     → gasto relacional válido. Familismo latinoamericano es variable real, no evitable.
+  necessary  → inevitable pero optimizable (mínimo > 0 aun en crisis).
+  discretionary (Flexible) → única gaveta con libertad real de corte. Aquí vive el coaching de mayor impacto.
+  El gasto relacional vive en la subcat 'social' bajo flexible — válido (familismo LatAm), no es ruido.
+  Ahorro / inversión-instrumento NO es gasto → metas/bolsillos, no categoría.
 
 Umbrales (usar para diagnosticar, no para regañar):
   ratio_fijos ≤50% excelente | 51-65% saludable | 66-75% alerta | >75% crítico (problema estructural)

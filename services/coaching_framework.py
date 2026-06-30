@@ -15,45 +15,57 @@ FRAMEWORK: dict[str, dict] = {
     # ── Categorías por agencia ───────────────────────────────────────────────
     "categorias_agencia": {
         "resumen": (
-            "Las 6 categorías del sistema miden AGENCIA (cuánta libertad tiene el usuario sobre "
-            "ese peso), no tipo contable. Esto viene de la teoría de Mental Accounting de Richard "
-            "Thaler (Nobel 2017): la gente toma decisiones distintas según cómo categoriza el dinero. "
-            "Agrupar 'arriendo' y 'delivery' bajo 'gastos del mes' hace que el cerebro los trate igual."
+            "El sistema clasifica el gasto por AGENCIA (cuánto margen de maniobra tiene el usuario "
+            "sobre ese peso), no por tipo contable ni funcional. Son 3 tiers, no 6. La taxonomía es una "
+            "síntesis de marcos de práctica (Conscious Spending Plan de Ramit Sethi + values-based "
+            "budgeting) y se apoya en la literatura de control percibido / autoeficacia financiera "
+            "(Cobb-Clark 2016; Asebedo 2019), que es lo que predice ahorro. OJO: la categorización por sí "
+            "sola es un lever débil (RCT Clarity Money); lo que cambia conducta es la percepción de control "
+            "+ la reflexión al clasificar. Por eso el agente PROPONE y el usuario confirma."
+        ),
+        "pregunta_unica": (
+            "Toda categoría responde la MISMA pregunta — eso la hace estable: "
+            "'Si la situación financiera empeora, ¿qué margen tengo sobre este gasto?'"
         ),
         "categorias": {
             "committed": (
-                "Sin elección real. Cancelar tiene consecuencia contractual o social severa. "
-                "Arriendo, créditos, PILA, seguros. El usuario NO puede bajar esto con fuerza de voluntad."
+                "Sin elección real. No puedo dejar de pagarlo sin incumplir una obligación legal/contractual. "
+                "Arriendo, créditos (pago mínimo), seguros, servicios fijos. NO se baja con fuerza de voluntad."
             ),
             "necessary": (
-                "Inevitable pero optimizable. El usuario puede gastar menos si se esfuerza. "
-                "Mercado, transporte, salud, celular. Acá hay palancas reales de reducción."
+                "Inevitable pero optimizable: aun en crisis el mínimo de esa función sigue > 0, aunque reduzca "
+                "el monto. Mercado, transporte, salud, celular, herramientas de trabajo. Hay palancas de reducción."
             ),
-            "discretionary": (
-                "Elección activa. El único lugar con libertad real de corte. "
-                "Restaurantes, delivery, ocio, ropa. Aquí vive el coaching conductual de mayor impacto."
-            ),
-            "investment": (
-                "Retorno futuro medible. Cursos, libros, herramientas. "
-                "Categorizar correctamente importa: un gasto de investment no es 'lujo'."
-            ),
-            "social": (
-                "Gasto relacional con valor real pero que requiere conciencia. "
-                "Regalos, salidas, familia. El familismo latinoamericano hace que este bucket "
-                "sea más grande que en metodologías anglosajonas — no juzgar, nombrar."
+            "flexible": (
+                "Código DB: 'discretionary' (display 'Flexible'). Podría llevarse a CERO en una crisis. "
+                "Restaurantes, delivery, ocio, ropa, cursos, suplementos, y el gasto relacional (subcat 'social'). "
+                "Es el lugar con libertad real de corte y donde vive el coaching de mayor impacto. "
+                "EXCEPCIÓN: un flexible puede estar marcado como 'prioridad defendida' (el usuario elige "
+                "protegerlo por encima del orden por defecto) — reconocer la elección, no friccionar."
             ),
         },
+        "arbol_decision": (
+            "1) ¿Hay obligación contractual/legal? SÍ → committed. "
+            "2) Si NO: ¿podría eliminarlo por completo en una crisis? SÍ → flexible (discretionary). "
+            "NO (queda un mínimo > 0) → necessary."
+        ),
+        "fuera_del_eje": (
+            "INVERSIÓN y SOCIAL ya no son tiers. El gasto 'en uno mismo' (cursos, suplementos, herramientas) "
+            "cae en su tier por la pregunta única, no en una gaveta de 'inversión' (esa etiqueta invitaba a "
+            "racionalizar — self-licensing). Lo social es la subcat 'social' bajo flexible. El AHORRO y la "
+            "inversión-instrumento (fondo de emergencia, bolsillos, CDT, acciones) NO son gasto: van a metas/"
+            "bolsillos (savings_goal / sinking_fund), nunca a una categoría de gasto."
+        ),
         "diagnostico_clave": (
             "Si committed > 70% del ingreso base → el problema es ESTRUCTURAL, no de disciplina. "
-            "El agente debe decirlo explícitamente: 'tu problema no es fuerza de voluntad, "
-            "es que el 75% de tu ingreso ya está comprometido antes de que decidas nada'. "
-            "La solución requiere cambios estructurales (renegociar contratos, aumentar ingreso), "
-            "no más restricción en discretionary."
+            "Decirlo explícito: 'tu problema no es fuerza de voluntad, es que el 75% de tu ingreso ya está "
+            "comprometido antes de que decidas nada'. Solución: cambios estructurales (renegociar, subir ingreso), "
+            "no más restricción en flexible."
         ),
         "coaching_approach": (
-            "Nombrar la categoría al confirmar cada transacción refuerza conciencia sin moralizar. "
+            "Nombrar el tier al confirmar cada transacción refuerza conciencia sin moralizar. "
             "'$80K en delivery — fue flexible' es más poderoso que un regaño. "
-            "El reconocimiento cognitivo del tipo de gasto precede al cambio de conducta."
+            "El reconocimiento del tipo de gasto precede al cambio de conducta."
         ),
     },
 
