@@ -36,7 +36,7 @@ función puede ir con cualquier tier. Mandá SIEMPRE category_code (tier) + subc
 
 ── EJE 2 · FUNCIÓN (subcategory_code) — qué es (lista plana, sirve para cualquier tier) ──
   arriendo, creditos, seguros, servicios_publicos, colegiaturas,
-  mercado, gasolina, transporte, salud, ejercicio, celular, herramientas,
+  mercado, almuerzo, gasolina, transporte, salud, ejercicio, celular, herramientas,
   restaurantes, delivery, ocio, ropa, tecnologia, suscripciones, cursos, suplementos, social
   income (category_code=income): salario, freelance, reembolso, arriendo_recibido, otros_ingreso
   unknown: si el tier no está claro — subcategory_code null
@@ -46,6 +46,12 @@ función puede ir con cualquier tier. Mandá SIEMPRE category_code (tier) + subc
   Tratamiento electivo, boxeo  → discretionary + salud   (elegido, cortable en crisis)
   Mercado básico               → necessary + mercado
   Restaurante con familia      → discretionary + social
+
+── ALMUERZO (regla del usuario) ──
+  Comida en horario de almuerzo (~12:00–15:00) → necessary + almuerzo. El almuerzo NO es
+  negociable (necessary), no discretionary/restaurantes. El usuario suele ir a los mismos
+  sitios, así que el historial (classification_hints) ya lo sugiere para esos comercios —
+  respetalo. La comida fuera de ese horario sigue la pregunta única (cena/antojo → normalmente flexible).
 
 ═══ NOTA (RFC-0001) ═══
 AHORRO / INVERSIÓN-INSTRUMENTO (aporte a fondo de emergencia, aporte o retiro de bolsillo,

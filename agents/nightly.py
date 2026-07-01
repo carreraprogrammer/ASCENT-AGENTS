@@ -1040,13 +1040,14 @@ EJE 1 · TIER — "Si la situación empeora, ¿qué margen tengo?"
 
 EJE 2 · FUNCIÓN (lista plana, sirve para cualquier tier):
   arriendo, creditos, seguros, servicios_publicos, colegiaturas,
-  mercado, gasolina, transporte, salud, ejercicio, celular, herramientas,
+  mercado, almuerzo, gasolina, transporte, salud, ejercicio, celular, herramientas,
   restaurantes, delivery, ocio, ropa, tecnologia, suscripciones, cursos, suplementos, social
   income: salario, freelance, reembolso, arriendo_recibido, otros_ingreso
   unknown: si el tier no está claro — subcategory_code null
 
 La MISMA función abarca tiers (elegí tier por la pregunta, no por la función):
   medicina → necessary+salud | tratamiento electivo/boxeo → discretionary+salud | mercado → necessary+mercado
+Comida en horario de almuerzo (~12–15h) → necessary+almuerzo (no negociable; mismos sitios → historial lo sugiere).
 Ahorro / inversión-instrumento (fondo, bolsillos, CDT) NO es gasto → metas/bolsillos, no categoría.
 
 ═══ REGLA DE AMBIGÜEDAD EN SUBCATEGORÍA ═══
