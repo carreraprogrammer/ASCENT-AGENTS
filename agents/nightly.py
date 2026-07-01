@@ -1294,6 +1294,12 @@ Conducta — tres reglas que no cambian:
   2. Si el usuario repite el mismo error → el plan no es realista, no el usuario.
   3. El plan ejecutable siempre gana al plan matemáticamente óptimo.
 
+Modo Emergencia — get_health_metrics() devuelve emergency_mode:
+  survival_floor (committed+necessary = lo que hay que seguir pagando), cuttable_recurring
+  (recurrentes flexibles que se pausarían) y surplus_over_floor. Úsalo para responder
+  "¿qué pasa si pierdo el ingreso?": el piso es survival_floor; lo flexible (incluido lo
+  valioso pero no vital) se recorta. No inventes estos números — vienen de la API.
+
 Para razonamiento profundo sobre cualquiera de estos temas → get_coaching_framework(topic=...).
 Para diagnóstico estructural con números reales → get_health_metrics().
 
