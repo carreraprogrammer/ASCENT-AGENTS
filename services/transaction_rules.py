@@ -24,37 +24,33 @@ INBOUND_TRANSFER_RE = re.compile(
 
 
 SUBCATEGORY_REFERENCE = """\
-═══ CLASIFICACIÓN POR AGENCIA — 3 TIERS ═══
+═══ CLASIFICÁS EN DOS EJES INDEPENDIENTES ═══
+Cada gasto tiene un TIER (agencia) y una FUNCIÓN (qué es). Son ORTOGONALES: una misma
+función puede ir con cualquier tier. Mandá SIEMPRE category_code (tier) + subcategory_code (función).
 
-Pregunta única para clasificar CUALQUIER gasto:
-  "Si mi situación financiera empeora, ¿qué margen de maniobra tengo sobre este gasto?"
-    → No puedo dejar de pagarlo sin incumplir una obligación   → committed
-    → Lo sigo necesitando aunque reduzca el monto (mínimo > 0)  → necessary
-    → Podría llevarlo a CERO en una crisis                      → discretionary (= "Flexible")
+── EJE 1 · TIER (category_code) — pregunta única ──
+  "Si mi situación empeora, ¿qué margen tengo sobre este gasto?"
+    No puedo dejar de pagarlo sin incumplir una obligación   → committed
+    Lo sigo necesitando aunque reduzca el monto (mínimo > 0)  → necessary
+    Podría llevarlo a CERO en una crisis                      → discretionary (= "Flexible")
 
-═══ SUBCATEGORÍAS VÁLIDAS (category_code → subcategory_code) ═══
-
-committed (Comprometido):
-  arriendo, creditos, seguros, servicios_publicos, colegiaturas
-
-necessary (Necesario):
-  mercado, gasolina, transporte, salud, ejercicio, celular, herramientas
-
-discretionary (Flexible):
+── EJE 2 · FUNCIÓN (subcategory_code) — qué es (lista plana, sirve para cualquier tier) ──
+  arriendo, creditos, seguros, servicios_publicos, colegiaturas,
+  mercado, gasolina, transporte, salud, ejercicio, celular, herramientas,
   restaurantes, delivery, ocio, ropa, tecnologia, suscripciones, cursos, suplementos, social
+  income (category_code=income): salario, freelance, reembolso, arriendo_recibido, otros_ingreso
+  unknown: si el tier no está claro — subcategory_code null
 
-income (Ingreso):
-  salario, freelance, reembolso, arriendo_recibido, otros_ingreso
+── La MISMA función abarca tiers (elegí el tier por la pregunta, no por la función) ──
+  Medicina / EPS               → necessary + salud
+  Tratamiento electivo, boxeo  → discretionary + salud   (elegido, cortable en crisis)
+  Mercado básico               → necessary + mercado
+  Restaurante con familia      → discretionary + social
 
-unknown: usá cuando la categoría no está clara — subcategory_code omitido (null)
-
-═══ NOTAS DEL MODELO (RFC-0001) ═══
-- Ya NO existen los tiers "investment" ni "social". El gasto relacional (regalos, salidas,
-  familia, amigos, donaciones) va a discretionary/social. El gasto "en uno mismo" cae en su
-  tier por la pregunta única: cursos/suplementos = discretionary; herramientas de trabajo = necessary.
-- AHORRO / INVERSIÓN-INSTRUMENTO (aporte a fondo de emergencia, aporte o retiro de bolsillo,
-  CDT, acciones, cripto) NO es un gasto. NO uses una categoría de gasto: usá las herramientas
-  de ahorro/metas (savings_goal / sinking_fund).
+═══ NOTA (RFC-0001) ═══
+AHORRO / INVERSIÓN-INSTRUMENTO (aporte a fondo de emergencia, aporte o retiro de bolsillo,
+CDT, acciones, cripto) NO es un gasto ni un tier. Usá las herramientas de ahorro/metas
+(savings_goal / sinking_fund), no una categoría de gasto.
 """
 
 

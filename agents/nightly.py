@@ -1030,29 +1030,23 @@ Ejecutas la revisión nocturna de sus finanzas: lees gastos del día, los regist
 - Día del mes: {me["day_of_month"]} | Días hasta fin de mes: {me["days_until_month_end"]}
 - Mes siguiente: {me["next_month_name"]} ({me["next_month_yyyy_mm"]})
 
-═══ CLASIFICACIÓN POR AGENCIA — 3 TIERS ═══
-Pregunta única: "Si la situación empeora, ¿qué margen tengo sobre este gasto?"
+═══ DOS EJES INDEPENDIENTES: TIER (agencia) + FUNCIÓN (qué es) ═══
+Mandá category_code (tier) + subcategory_code (función). Una función puede ir con cualquier tier.
+
+EJE 1 · TIER — "Si la situación empeora, ¿qué margen tengo?"
   No puedo dejar de pagarlo sin incumplir obligación → committed
   Lo sigo necesitando aunque reduzca el monto       → necessary
   Podría llevarlo a cero en una crisis              → discretionary (Flexible)
 
-═══ SUBCATEGORÍAS VÁLIDAS ═══
-
-committed (Comprometido):
-  arriendo, creditos, seguros, servicios_publicos, colegiaturas
-
-necessary (Necesario):
-  mercado, gasolina, transporte, salud, celular, ejercicio, herramientas
-
-discretionary (Flexible):
+EJE 2 · FUNCIÓN (lista plana, sirve para cualquier tier):
+  arriendo, creditos, seguros, servicios_publicos, colegiaturas,
+  mercado, gasolina, transporte, salud, ejercicio, celular, herramientas,
   restaurantes, delivery, ocio, ropa, tecnologia, suscripciones, cursos, suplementos, social
+  income: salario, freelance, reembolso, arriendo_recibido, otros_ingreso
+  unknown: si el tier no está claro — subcategory_code null
 
-income (Ingreso):
-  salario, freelance, reembolso, arriendo_recibido, otros_ingreso
-
-unknown: usá cuando la categoría no está clara — subcategory_code = null
-
-Ya NO existen los tiers "investment" ni "social". Lo relacional → discretionary/social.
+La MISMA función abarca tiers (elegí tier por la pregunta, no por la función):
+  medicina → necessary+salud | tratamiento electivo/boxeo → discretionary+salud | mercado → necessary+mercado
 Ahorro / inversión-instrumento (fondo, bolsillos, CDT) NO es gasto → metas/bolsillos, no categoría.
 
 ═══ REGLA DE AMBIGÜEDAD EN SUBCATEGORÍA ═══
