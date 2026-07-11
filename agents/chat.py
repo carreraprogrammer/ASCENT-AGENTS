@@ -234,7 +234,7 @@ def _run_conversation(
         }
         counter2 = [0]
         tool_map2 = _make_counted_tool_map(build_tool_map(api, messenger, now_col, state2), counter2)
-        provider.run_agent(
+        retry_text = provider.run_agent(
             system_prompt=SYSTEM_PROMPT,
             tools=build_tools(),
             tool_map=tool_map2,
@@ -253,9 +253,13 @@ def _run_conversation(
         if state2["mutated"]:
             messenger.send_message("✅ Listo.")
             return None
-        logger.error("[chat_agent] retry also skipped tool calls")
-        messenger.send_message("⚠️ No pude procesar eso. Intentá de nuevo o verificá en la app.")
-        return None
+        # El modelo insistió en responder solo con texto (sin send_telegram). Una respuesta
+        # conversacional directa sigue siendo válida —común en mensajes de seguimiento—, así que
+        # la entregamos en lugar de mostrar un error.
+        fallback = retry_text or final_text
+        logger.warning("[chat_agent] retry still skipped tool calls — delivering direct text")
+        messenger.send_message(normalize_telegram_html(fallback))
+        return fallback
 
     if final_text:
         logger.warning("[chat_agent] provider returned direct text without send_telegram tool")
