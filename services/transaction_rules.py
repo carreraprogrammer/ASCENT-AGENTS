@@ -21,6 +21,13 @@ INBOUND_TRANSFER_RE = re.compile(
     r"(abono|transferencia|recibiste|recibido).*(bre-b|llave|cta\s+de\s+ahorros|cuenta\s+de\s+ahorros)",
     re.IGNORECASE,
 )
+# Transferencia SALIENTE a una llave/Bre-B sin destinatario identificable: el banco no dice
+# si la llave es propia o de otra persona, así que puede ser un pago real. No se descarta:
+# se fuerza a pending para revisión. (SELF_TRANSFER_RE cubre el caso claramente propio → guard.)
+AMBIGUOUS_OUTBOUND_TRANSFER_RE = re.compile(
+    r"transferencia\s+a\s+una\s+llave|(env[ií]o|transferencia\s+enviada|descuento\s+transferencia).*(bre-b|llave)",
+    re.IGNORECASE,
+)
 
 
 SUBCATEGORY_REFERENCE = """\
@@ -108,7 +115,14 @@ Si es un pago A un crédito o préstamo → registrar como gasto debit. "crédit
 TRANSFER_RULES = """\
 ═══ REGLA — TRANSFERENCIAS ENTRE CUENTAS PROPIAS ═══
 Mover plata entre cuentas propias, llaves propias, bolsillos o tarjeta propia NO es ingreso ni gasto.
-Si el texto apunta a transferencia interna, no registres una transacción confirmada.
+Solo descartá cuando el texto identifica CLARAMENTE que el destino es tuyo (tu nombre, tu cédula,
+tu propia cuenta/llave/tarjeta). En ese caso no registres una transacción confirmada.
+
+⚠️ "Transferencia a una llave" / Bre-B SALIENTE sin destinatario identificable (ej. Davivienda:
+"Descuento Transferencia a una llave", "App Davivienda", sin nombre de quien recibe): NO la descartes.
+Una llave puede ser de OTRA persona → es un pago real (gasto). Como el banco no dice de quién es la
+llave, registrala SIEMPRE como gasto pending (payment_source="debit", status="pending") para que el
+usuario confirme si fue pago a un tercero o movimiento interno. Nunca la ignores por completo.
 Si hay duda real sobre si es ingreso externo o movimiento interno, crea una transacción pending para revisión.
 """
 
@@ -131,7 +145,10 @@ def transaction_guard_reason(text: str) -> str | None:
 
 
 def should_force_pending(text: str) -> bool:
-    return bool(INBOUND_TRANSFER_RE.search(text))
+    if SELF_TRANSFER_RE.search(text):
+        # Transferencia claramente propia → la maneja el guard, no forzar pending aquí.
+        return False
+    return bool(INBOUND_TRANSFER_RE.search(text) or AMBIGUOUS_OUTBOUND_TRANSFER_RE.search(text))
 
 
 def normalize_categories(raw_rows: list[dict]) -> list[dict]:

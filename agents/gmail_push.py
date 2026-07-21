@@ -463,6 +463,9 @@ Reglas críticas:
 - No tienes herramienta de mensajería directa. create_transaction avisará a la app cuando cree una transacción
   y pedirá clasificación con botones si queda pendiente o sin subcategoría.
 - Si un correo no tiene suficiente información para determinar monto o tipo, ignóralo.
+- Si un correo trae "Force pending: sí", es un movimiento marcado como dudoso (transferencia entrante,
+  o transferencia saliente a una llave/Bre-B sin destinatario claro): SIEMPRE registralo con
+  create_transaction status="pending". NUNCA lo ignores — el usuario lo revisará y clasificará después.
 """ + "\n\n" + TRANSACTION_CREATION_RULES
 
 
