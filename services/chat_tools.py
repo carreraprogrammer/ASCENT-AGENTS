@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timedelta
 from typing import Any
 
@@ -809,10 +810,43 @@ def build_tools() -> list[dict[str, Any]]:
     ]
 
 
-def _send_telegram(messenger: MessengerPort, payload: dict, state: dict | None = None) -> dict:
+# Botones que operan sobre una transacción concreta: cat:{id}:{code} | confirm:{id}
+# | pay:{id}:{source} | skip:{id}. El id DEBE existir; si el modelo lo alucina, el
+# tap termina en un PATCH 404 y el usuario ve "Error al confirmar".
+_TXN_ACTION_RE = re.compile(r"^(cat|confirm|pay|skip):(\d+)(?::|$)")
+
+
+def _sanitize_action_buttons(api: RailsApiPort, button_rows: list) -> list:
+    """Descarta botones cuyo id de transacción no existe en la cuenta (guardrail
+    anti-alucinación del LLM). Fail-open: ante error de red/5xx se conserva el botón."""
+    exists_cache: dict[str, bool] = {}
+    cleaned_rows: list = []
+    for row in button_rows or []:
+        cleaned = []
+        for btn in row or []:
+            data = str((btn or {}).get("callback_data") or "").strip()
+            m = _TXN_ACTION_RE.match(data)
+            if m:
+                txn_id = m.group(2)
+                if txn_id not in exists_cache:
+                    try:
+                        exists_cache[txn_id] = api.transaction_exists(txn_id)
+                    except Exception as e:  # red/5xx → fail-open, no bloquear
+                        logger.warning("[chat_agent] no se pudo validar txn %s del botón: %s", txn_id, e)
+                        exists_cache[txn_id] = True
+                if not exists_cache[txn_id]:
+                    logger.warning("[chat_agent] botón descartado, transacción inexistente: callback_data=%s", data)
+                    continue
+            cleaned.append(btn)
+        if cleaned:
+            cleaned_rows.append(cleaned)
+    return cleaned_rows
+
+
+def _send_telegram(api: RailsApiPort, messenger: MessengerPort, payload: dict, state: dict | None = None) -> dict:
     message = payload.get("message") or payload.get("mensaje") or ""
     normalized = normalize_telegram_html(message)
-    button_rows = payload.get("inline_keyboard") or []
+    button_rows = _sanitize_action_buttons(api, payload.get("inline_keyboard") or [])
 
     logger.info(
         "[chat_agent] send_telegram message_len=%d button_rows=%d",
@@ -1166,5 +1200,5 @@ def build_tool_map(
         "delete_income_source": lambda p: _delete(f"/api/v1/income_sources/{p['id']}"),
         "web_search": _web_search_with_notice,
         "get_coaching_framework": lambda p: get_topic(p.get("topic", "")),
-        "send_telegram": lambda p: state.update({"responded": True}) or _send_telegram(messenger, p, state),
+        "send_telegram": lambda p: state.update({"responded": True}) or _send_telegram(api, messenger, p, state),
     }
