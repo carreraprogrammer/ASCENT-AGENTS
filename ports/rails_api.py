@@ -37,6 +37,11 @@ class RailsApiPort(ABC):
         ...
 
     @abstractmethod
+    def transaction_exists(self, txn_id: int | str) -> bool:
+        """GET /api/v1/transactions/:id — True si existe en la cuenta, False si 404."""
+        ...
+
+    @abstractmethod
     def get_active_pending_action(self) -> dict | None:
         """GET /api/v1/pending_actions/active — None si no hay ninguno activo"""
         ...

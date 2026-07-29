@@ -7,10 +7,16 @@ El Brain responde inmediatamente (< 2s) y actualiza la transacción en Rails.
 
 import logging
 
+import httpx
+
 from ports.rails_api import RailsApiPort
 from ports.messenger import MessengerPort
 
 logger = logging.getLogger(__name__)
+
+
+def _is_not_found(exc: Exception) -> bool:
+    return isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code == 404
 
 
 _PAYMENT_SOURCE_LABEL = {
@@ -47,7 +53,10 @@ def handle(api: RailsApiPort, messenger: MessengerPort, data: str) -> None:
             messenger.send_message(f"✅ <b>{concept}</b> → <i>{subcat_code}</i>")
         except Exception as e:
             logger.error("[callback_handler] cat update failed: %s", e)
-            messenger.send_message("❌ Error al actualizar la transacción.")
+            if _is_not_found(e):
+                messenger.send_message("⚠️ Esa transacción ya no existe. Vuelve a registrarla.")
+            else:
+                messenger.send_message("❌ Error al actualizar la transacción.")
 
     elif parts[0] == "confirm" and len(parts) == 2:
         txn_id = parts[1]
@@ -61,7 +70,10 @@ def handle(api: RailsApiPort, messenger: MessengerPort, data: str) -> None:
             messenger.send_message(f"✅ <b>{concept}</b> confirmado")
         except Exception as e:
             logger.error("[callback_handler] confirm update failed: %s", e)
-            messenger.send_message("❌ Error al confirmar.")
+            if _is_not_found(e):
+                messenger.send_message("⚠️ Esa transacción ya no existe. Vuelve a registrarla.")
+            else:
+                messenger.send_message("❌ Error al confirmar.")
 
     elif parts[0] == "pay" and len(parts) == 3:
         txn_id, payment_source = parts[1], parts[2]
@@ -77,7 +89,10 @@ def handle(api: RailsApiPort, messenger: MessengerPort, data: str) -> None:
             messenger.send_message(f"✅ <b>{concept}</b> → {label}")
         except Exception as e:
             logger.error("[callback_handler] pay update failed: %s", e)
-            messenger.send_message("❌ Error al actualizar el medio de pago.")
+            if _is_not_found(e):
+                messenger.send_message("⚠️ Esa transacción ya no existe. Vuelve a registrarla.")
+            else:
+                messenger.send_message("❌ Error al actualizar el medio de pago.")
 
     elif parts[0] == "skip" and len(parts) == 2:
         txn_id = parts[1]

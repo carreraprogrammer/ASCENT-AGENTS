@@ -132,6 +132,17 @@ class RailsHttpAdapter(RailsApiPort):
     def update_transaction(self, txn_id: int | str, **attrs) -> dict:
         return self._patch(f"/api/v1/transactions/{txn_id}", attrs)
 
+    def transaction_exists(self, txn_id: int | str) -> bool:
+        """True si la transacción existe en la cuenta. False solo ante 404;
+        otros errores (red, 5xx) se propagan para poder fail-open aguas arriba."""
+        try:
+            self._get(f"/api/v1/transactions/{txn_id}")
+            return True
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                return False
+            raise
+
     # --- pending actions ---
 
     def get_active_pending_action(self) -> dict | None:
