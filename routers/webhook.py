@@ -13,6 +13,7 @@ Flujo de despacho (por prioridad):
 """
 
 import asyncio
+import hmac
 import logging
 import os
 
@@ -30,6 +31,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 AUTHORIZED_CHAT_ID = int(os.environ.get("TELEGRAM_CHAT_ID", "0"))
+# Secreto que Telegram reenvía en cada update (setWebhook secret_token).
+WEBHOOK_SECRET = os.environ.get("TELEGRAM_WEBHOOK_SECRET", "")
+
+
+def _verify_telegram_secret(request: Request) -> None:
+    received = request.headers.get("X-Telegram-Bot-Api-Secret-Token", "")
+    if not WEBHOOK_SECRET or not hmac.compare_digest(received.encode(), WEBHOOK_SECRET.encode()):
+        raise HTTPException(status_code=403, detail="Forbidden")
 
 
 def _get_chat_id(update: dict) -> int | None:
@@ -42,6 +51,8 @@ def _get_chat_id(update: dict) -> int | None:
 
 @router.post("/webhook/telegram")
 async def telegram_webhook(request: Request) -> Response:
+    _verify_telegram_secret(request)
+
     try:
         update = await request.json()
     except Exception:
