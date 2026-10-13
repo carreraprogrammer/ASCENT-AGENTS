@@ -7,3 +7,12 @@ venv/
 dist/
 *.egg-info/
 .DS_Store
+
+# Secrets y configuración local — nunca versionar
+.claude/
+.env
+.env.*
+!.env.example
+config/master.key
+*.pem
+*.key

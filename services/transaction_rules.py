@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 
 
@@ -13,10 +14,42 @@ CARD_PAYMENT_RE = re.compile(
     r"(pago|abono|abonad[oa]|pago\s+m[ií]nimo)",
     re.IGNORECASE,
 )
-SELF_TRANSFER_RE = re.compile(
-    r"(env[ií]o|transferencia\s+enviada).*(bre-b|llave).*(***REMOVED***|***REMOVED***)",
-    re.IGNORECASE,
+
+
+def _owner_identity_pattern(full_name: str, transfer_key: str) -> str | None:
+    """Alternativas que identifican al dueño como destinatario de una transferencia.
+
+    full_name: "Nombre Segundo Apellido" → matchea el primer nombre seguido de
+    cualquiera de los demás tokens. transfer_key: una o varias llaves (Bre-B,
+    documento, celular) separadas por coma.
+    """
+    alternatives: list[str] = []
+    first, *rest = full_name.split() or [""]
+    if first and rest:
+        others = "|".join(re.escape(token) for token in rest)
+        alternatives.append(rf"{re.escape(first)}\s+({others})")
+    alternatives.extend(re.escape(key.strip()) for key in transfer_key.split(",") if key.strip())
+    return "|".join(alternatives) or None
+
+
+def build_self_transfer_re(full_name: str, transfer_key: str) -> re.Pattern[str]:
+    identity = _owner_identity_pattern(full_name, transfer_key)
+    if identity is None:
+        # Sin identidad configurada no hay forma de saber que el destino es propio:
+        # nunca matchea y la transferencia cae en AMBIGUOUS_OUTBOUND_TRANSFER_RE (pending).
+        return re.compile(r"(?!)")
+    return re.compile(
+        rf"(env[ií]o|transferencia\s+enviada).*(bre-b|llave).*({identity})",
+        re.IGNORECASE,
+    )
+
+
+# La identidad del dueño vive en el entorno, no en el código.
+SELF_TRANSFER_RE = build_self_transfer_re(
+    os.environ.get("OWNER_FULL_NAME", ""),
+    os.environ.get("OWNER_TRANSFER_KEY", ""),
 )
+
 INBOUND_TRANSFER_RE = re.compile(
     r"(abono|transferencia|recibiste|recibido).*(bre-b|llave|cta\s+de\s+ahorros|cuenta\s+de\s+ahorros)",
     re.IGNORECASE,

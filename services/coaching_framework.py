@@ -188,7 +188,7 @@ FRAMEWORK: dict[str, dict] = {
         "contexto_latam": (
             "En Colombia/LatAm: tasas de crédito de consumo (1.5-2%/mes = 18-24% anual) vs "
             "tarjetas de crédito (2-3%/mes = 24-36% anual). La TC generalmente es la primera "
-            "en atacar bajo avalanche. Préstamo Personal y préstamos personales después."
+            "en atacar bajo avalanche. Los créditos de consumo y préstamos personales después."
         ),
         "coaching_approach": (
             "Preguntar primero: '¿en el pasado, cuando intentaste pagar deuda, qué te hizo parar?' "

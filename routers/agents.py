@@ -51,7 +51,7 @@ class WebChatRequest(BaseModel):
     skip_history: bool = False
 
 
-@router.post("/nightly")
+@router.post("/nightly", dependencies=[Depends(_verify_service_token)])
 async def trigger_nightly(background_tasks: BackgroundTasks) -> dict:
     """Dispara la revisión nocturna en background."""
     from adapters.app_messenger import AppMessenger
@@ -60,7 +60,7 @@ async def trigger_nightly(background_tasks: BackgroundTasks) -> dict:
     return {"ok": True, "message": "Revisión nocturna iniciada en background."}
 
 
-@router.post("/nightly/recovery")
+@router.post("/nightly/recovery", dependencies=[Depends(_verify_service_token)])
 async def trigger_nightly_recovery(background_tasks: BackgroundTasks, date: str) -> dict:
     """Dispara la revisión nocturna para una fecha pasada (formato: YYYY-MM-DD)."""
     from adapters.app_messenger import AppMessenger
@@ -100,7 +100,7 @@ async def trigger_nightly_recovery(background_tasks: BackgroundTasks, date: str)
     return {"ok": True, "message": f"Revisión nocturna de {date} iniciada para {len(accounts)} cuenta(s)."}
 
 
-@router.post("/planning")
+@router.post("/planning", dependencies=[Depends(_verify_service_token)])
 async def trigger_planning_endpoint() -> dict:
     """Emite evento open_wizard para iniciar planificación desde la app."""
     api = RailsHttpAdapter()
