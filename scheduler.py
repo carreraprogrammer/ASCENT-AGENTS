@@ -82,6 +82,17 @@ def _make_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
+    # ── Consolidado diario al cerebro de The Cyborg Way — 6am Colombia (11:00 UTC) ──
+    # TCW-1: solo conclusiones (totales, desviaciones, alertas, decisiones), como nota en
+    # projects/ascent/episodic/runs/ del cerebro. Ya no va por correo (CONSOLIDADO_POR_CORREO, apagado).
+    scheduler.add_job(
+        func=_run_consolidado,
+        trigger=CronTrigger(hour=11, minute=0),
+        id="consolidado_cerebro",
+        name="Consolidado diario al cerebro",
+        replace_existing=True,
+    )
+
     # ── Keep-alive Rails API (cada 5 min) — evita cold start en Railway ──────
     scheduler.add_job(
         func=_ping_rails,
@@ -117,6 +128,17 @@ async def _run_auto_debits_all_accounts() -> None:
             logger.info("[auto_debits] account_id=%s — %s", account_id, result)
         except Exception as e:
             logger.error("[auto_debits] account_id=%s — error: %s", account_id, e)
+
+
+async def _run_consolidado() -> None:
+    """El consolidado del dueño (MVP de un usuario: DANIEL15K_ACCOUNT_ID) al cerebro. Nunca registra cifras."""
+    from adapters.rails_http import RailsHttpAdapter
+    from cromo import consolidado
+    try:
+        result = await consolidado.run(RailsHttpAdapter())
+        logger.info("[consolidado] %s", "ok" if "error" not in result else "error del cerebro")
+    except Exception as e:
+        logger.error("[consolidado] error: %s", type(e).__name__)
 
 
 async def _run_gmail_watch_renewal() -> None:
