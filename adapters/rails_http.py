@@ -118,6 +118,15 @@ class RailsHttpAdapter(RailsApiPort):
 
     # --- transactions ---
 
+    def create_transaction(self, payload: dict) -> dict:
+        """POST /api/v1/transactions (el cromo: registrar_gasto). {"ok", "id"}; 409 = ya existía."""
+        resp = httpx.post(f"{BASE_URL}/api/v1/transactions", headers=self.headers(), json=payload, timeout=TIMEOUT)
+        if resp.status_code == 409:
+            return {"ok": True, "id": resp.json().get("existing_id"), "already_existed": True}
+        resp.raise_for_status()
+        data = resp.json().get("data", {})
+        return {"ok": True, "id": data.get("id")}
+
     def get_transactions(self, month: int, year: int) -> list[dict]:
         data = self._get("/api/v1/transactions", {"month": month, "year": year, "page": 1, "per_page": 100})
         return data if isinstance(data, list) else data.get("data", [])

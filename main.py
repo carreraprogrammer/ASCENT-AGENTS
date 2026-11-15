@@ -17,6 +17,9 @@ from fastapi.responses import JSONResponse
 
 from routers import webhook, agents, errors
 import scheduler as sched
+from adapters.rails_http import RailsHttpAdapter
+from cromo.manifest import MANIFEST
+from cromo.server import make_server
 
 load_dotenv()
 
@@ -27,11 +30,17 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+# ── Ascent como cromo de The Cyborg Way (TCW-1): MCP en /mcp, solo con tokens del cerebro para Ascent ──
+cromo_mcp = make_server(RailsHttpAdapter)
+cromo_app = cromo_mcp.streamable_http_app(stateless_http=True, json_response=True, host="0.0.0.0")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Brain iniciando — arrancando scheduler...")
     sched.start()
-    yield
+    async with cromo_app.router.lifespan_context(cromo_app):   # el gestor de sesiones del MCP del cromo
+        yield
     logger.info("Brain cerrando — deteniendo scheduler...")
     sched.stop()
 
@@ -47,6 +56,14 @@ app = FastAPI(
 app.include_router(webhook.router)
 app.include_router(agents.router)
 app.include_router(errors.router)
+
+
+app.router.routes.extend(cromo_app.routes)   # /mcp y /.well-known/oauth-protected-resource/mcp
+
+
+@app.get("/.well-known/cromo.json")
+async def cromo_manifest():
+    return JSONResponse(MANIFEST, headers={"Cache-Control": "public, max-age=300"})
 
 
 # ── Health ───────────────────────────────────────────────────────────────────

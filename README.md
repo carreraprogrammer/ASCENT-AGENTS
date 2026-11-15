@@ -300,3 +300,28 @@ Si el Brain no responde al callback de Telegram en ese tiempo, el botón queda g
 
 **Arquitectura hexagonal para testabilidad**
 Los agentes no saben si están hablando con Railway real o un mock. Inyectar los adapters desde `main.py` permite swapear implementaciones para tests o modo de desarrollo sin tocar la lógica de negocio.
+
+## Ascent como cromo de The Cyborg Way (TCW-1)
+
+Ascent es el primer cromo del cerebro de The Cyborg Way (https://thecyborgway.dev).
+
+| Ruta | Qué es |
+|------|--------|
+| `/.well-known/cromo.json` | El manifiesto: slug `ascent`, recurso canónico, scopes `ascent:read` y `ascent:write`, space `ascent` |
+| `/mcp` | Servidor MCP del cromo (`cromo/server.py`): `resumen_mes`, `gasto_por_categoria`, `obligaciones_proximas`, `ultimos_movimientos` (lectura) y `registrar_gasto` (`ascent:write`) |
+| `/.well-known/oauth-protected-resource/mcp` | Dice que los tokens los emite el cerebro |
+
+- **Tokens.** El MCP solo acepta JWT del cerebro (ES256, verificados con su JWKS) con `iss` = el cerebro,
+  `aud` = `ASCENT_RESOURCE` y `exp` vigente (`cromo/tokens.py`). Un token del cerebro para el propio cerebro se
+  rechaza: no hay passthrough. El cerebro llega con un token propio de Ascent, obtenido por token exchange.
+- **Consolidado diario** (`cromo/consolidado.py`, 6am Colombia). Es una nota en
+  `projects/ascent/episodic/runs/YYYY-MM-DD-consolidado.md` del cerebro, escrita con el cliente de máquina de
+  Ascent (`client_credentials`, `brain:write`, solo el space `ascent`).
+  - Lleva solo conclusiones: totales redondeados, desviaciones en porcentaje, alertas y decisiones sugeridas.
+  - Nunca lleva movimientos, conceptos ni saldos.
+  - `CONSOLIDADO_POR_CORREO` queda apagado: hoy no existe un envío por correo del consolidado.
+
+Variables:
+- `BRAIN_ISSUER` (por defecto `https://thecyborgway.dev`);
+- `ASCENT_RESOURCE` (la URL de `/mcp` de este servicio);
+- `BRAIN_CLIENT_ID` y `BRAIN_CLIENT_SECRET` (el cliente de máquina; en el cerebro solo vive el hash del secreto).
