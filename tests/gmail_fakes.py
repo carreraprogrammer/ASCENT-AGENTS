@@ -92,6 +92,7 @@ class FakeWorld:
         self.get_calls: list[tuple[str, dict]] = []
         self.post_calls: list[tuple[str, dict]] = []
         self.next_id = 1000
+        self.hints: dict[str, dict] = {}  # comercio → data de classification_hints
 
     # -- helpers --
     def add_message(self, email: dict) -> None:
@@ -149,7 +150,12 @@ class FakeWorld:
             mid = path.rsplit("/", 1)[1]
             if mid not in self.messages:
                 return FakeResponse(404, {})
-            return FakeResponse(200, gmail_message_json(self.messages[mid]))
+            body = gmail_message_json(self.messages[mid])
+            for day, emails in self.emails_by_day.items():
+                if any(e["id"] == mid for e in emails):  # mediodía de Colombia de ese día, en ms
+                    noon = datetime(day.year, day.month, day.day, 12, tzinfo=COLOMBIA_TZ)
+                    body["internalDate"] = str(int(noon.timestamp() * 1000))
+            return FakeResponse(200, body)
         if path.endswith("/api/v1/me/email_connection/token"):
             return FakeResponse(200, {"data": {"access_token": "tok-ficticio", "bank_senders": []}})
         if path.endswith("/api/v1/transactions"):
@@ -169,7 +175,8 @@ class FakeWorld:
                                            "subcategories": [{"code": "supermercado", "name": "Supermercado"}]}},
             ]})
         if path.endswith("/classification_hints"):
-            return FakeResponse(200, {"data": {"candidates": [], "samples": 0}})
+            default = {"merchant": params.get("merchant"), "candidates": [], "samples": 0, "dominant": None}
+            return FakeResponse(200, {"data": self.hints.get(params.get("merchant"), default)})
         if path.endswith("/api/v1/agent/accounts/demo"):
             return FakeResponse(200, {"data": {"id": 99, "demo": True}})
         return FakeResponse(404, {})

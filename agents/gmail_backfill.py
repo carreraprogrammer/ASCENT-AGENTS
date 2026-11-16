@@ -297,6 +297,46 @@ def _make_dry_run_recorder(counter: list[int]) -> Callable[[dict], dict]:
     return create_transaction
 
 
+def guarded_create(inp: dict, *, inner_create: Callable[[dict], dict], known_ids: set[str], stats: dict,
+                   day: date, day_rows: list[dict], created_ids: list[str], dry_run: bool) -> dict:
+    """Envoltura de create_transaction común al backfill con LLM y al de la oficina:
+    quita savings_goal_id / sinking_fund_id, salta ids ya registrados (known_ids), delega en
+    inner_create (la herramienta real de _build_tool_map o el registrador de --dry-run, que aplican
+    las guardas y el force pending de _prepare_transaction) y cuenta el resultado en stats.
+    Lo creado se añade a day_rows (contexto anti-duplicados del día) y a known_ids."""
+    inp = dict(inp)
+    for key in ("savings_goal_id", "sinking_fund_id"):
+        if inp.pop(key, None) is not None:
+            stats["goal_link_stripped"] += 1
+    sid = (inp.get("metadata") or {}).get("source_event_id")
+    if sid and sid in known_ids:
+        stats["duplicate_id"] += 1
+        return {"ok": True, "created": False, "already_existed": True,
+                "detail": "source_event_id ya registrado"}
+    res = inner_create(inp)
+    if res.get("created"):
+        stats["created"] += 1
+        if res.get("status") == "pending":
+            stats["pending"] += 1
+        if sid:
+            known_ids.add(sid)
+        if not dry_run and res.get("id"):
+            created_ids.append(str(res["id"]))
+        day_rows.append({"id": res.get("id"), "attributes": {
+            "date": (inp.get("date") or day.isoformat())[:10], "concept": res.get("concept"),
+            "amount": res.get("amount"), "transaction_type": inp.get("transaction_type"),
+            "status": res.get("status"), "source": "gmail"}})
+    elif res.get("ignored"):
+        stats["guard_tool"] += 1
+    elif res.get("already_existed"):
+        stats["duplicate_id"] += 1
+        if sid:
+            known_ids.add(sid)
+    elif not res.get("ok"):
+        stats["errors"] += 1
+    return res
+
+
 def run_backfill(
     account_id: int,
     days: list[date],
@@ -405,39 +445,12 @@ def run_backfill(
             touched: set[str] = set()
 
             def create_transaction(inp: dict, _d=d, _stats=stats, _batch_ids=batch_ids, _touched=touched) -> dict:
-                inp = dict(inp)
-                for key in ("savings_goal_id", "sinking_fund_id"):
-                    if inp.pop(key, None) is not None:
-                        _stats["goal_link_stripped"] += 1
                 sid = (inp.get("metadata") or {}).get("source_event_id")
                 if sid in _batch_ids:
                     _touched.add(sid)
-                if sid and sid in known_ids:
-                    _stats["duplicate_id"] += 1
-                    return {"ok": True, "created": False, "already_existed": True,
-                            "detail": "source_event_id ya registrado"}
-                res = inner_create(inp)
-                if res.get("created"):
-                    _stats["created"] += 1
-                    if res.get("status") == "pending":
-                        _stats["pending"] += 1
-                    if sid:
-                        known_ids.add(sid)
-                    if not dry_run and res.get("id"):
-                        result.created_ids.append(str(res["id"]))
-                    run_rows[_d].append({"id": res.get("id"), "attributes": {
-                        "date": (inp.get("date") or _d.isoformat())[:10], "concept": res.get("concept"),
-                        "amount": res.get("amount"), "transaction_type": inp.get("transaction_type"),
-                        "status": res.get("status")}})
-                elif res.get("ignored"):
-                    _stats["guard_tool"] += 1
-                elif res.get("already_existed"):
-                    _stats["duplicate_id"] += 1
-                    if sid:
-                        known_ids.add(sid)
-                elif not res.get("ok"):
-                    _stats["errors"] += 1
-                return res
+                return guarded_create(inp, inner_create=inner_create, known_ids=known_ids, stats=_stats,
+                                      day=_d, day_rows=run_rows[_d], created_ids=result.created_ids,
+                                      dry_run=dry_run)
 
             tool_map = {**base_tools, "create_transaction": create_transaction}
             day_rows = month_rows.get((d.year, d.month), []) + run_rows[d]
@@ -502,7 +515,8 @@ def count_goal_linked(account_id: int, created_ids: list[str], months: Iterable[
     return linked
 
 
-def default_deps(account_id: int, access_token: str, *, extra_query: str = "") -> BackfillDeps:
+def default_deps(account_id: int, access_token: str, *, extra_query: str = "", llm: bool = True) -> BackfillDeps:
+    """llm=False (modos de la oficina): no construye el proveedor de LLM."""
     from services.llm_factory import build_llm_provider, resolve_llm_model
 
     return BackfillDeps(
@@ -510,7 +524,7 @@ def default_deps(account_id: int, access_token: str, *, extra_query: str = "") -
         fetch_message=lambda mid: _fetch_message(access_token, mid),
         fetch_month_rows=lambda y, m: fetch_month_rows(account_id, y, m),
         build_tool_map=lambda: _build_tool_map(account_id, notify=False),
-        provider=build_llm_provider(),
-        model=resolve_llm_model(),
+        provider=build_llm_provider() if llm else None,
+        model=resolve_llm_model() if llm else None,
         send_summary=default_send_summary(account_id),
     )
