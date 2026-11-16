@@ -16,7 +16,7 @@ import base64
 import html
 import logging
 import re
-from datetime import datetime, timezone, timedelta
+from datetime import date, datetime, timezone, timedelta
 
 import httpx
 
@@ -166,28 +166,39 @@ def _force_pending_email(email: dict) -> bool:
     return should_force_pending(_email_text(email))
 
 
-def _fetch_today_transactions(account_id: int) -> list[dict]:
-    """Transacciones ya registradas hoy — contexto para que el agente NO duplique
-    un mismo pago que llega en dos correos distintos (ej: notificación del banco +
-    confirmación del operador/PSE) con remitentes o textos diferentes."""
+def _fetch_day_transactions(account_id: int, day: date | None = None,
+                            month_rows: list[dict] | None = None) -> list[dict]:
+    """Transacciones ya registradas en `day` (hoy si no se pasa) — contexto para que el agente
+    NO duplique un mismo pago que llega en dos correos distintos (ej: notificación del banco +
+    confirmación del operador/PSE) con remitentes o textos diferentes.
+
+    month_rows: filas JSON:API del mes ya traídas por quien llama (el backfill las pagina completas);
+    sin ellas se consulta la primera página del mes, como siempre hizo el modo en tiempo real."""
     from agents.nightly import _flatten_transaction
 
-    now_col = datetime.now(COLOMBIA_TZ)
-    try:
-        resp = httpx.get(
-            f"{API_BASE_URL}/api/v1/transactions",
-            headers=build_auth_headers(str(account_id)),
-            params={"month": now_col.month, "year": now_col.year, "page": 1, "per_page": 100},
-            timeout=15,
-        )
-        resp.raise_for_status()
-        rows = resp.json().get("data", [])
-    except Exception as e:
-        logger.warning("[GmailPush] fetch today transactions error: %s", e)
-        return []
+    target = day or datetime.now(COLOMBIA_TZ).date()
+    rows = month_rows
+    if rows is None:
+        try:
+            resp = httpx.get(
+                f"{API_BASE_URL}/api/v1/transactions",
+                headers=build_auth_headers(str(account_id)),
+                params={"month": target.month, "year": target.year, "page": 1, "per_page": 100},
+                timeout=15,
+            )
+            resp.raise_for_status()
+            rows = resp.json().get("data", [])
+        except Exception as e:
+            logger.warning("[GmailPush] fetch today transactions error: %s", e)
+            return []
 
-    today = now_col.strftime("%Y-%m-%d")
-    return [t for t in (_flatten_transaction(r) for r in rows) if t.get("date") == today]
+    wanted = target.strftime("%Y-%m-%d")
+    return [t for t in (_flatten_transaction(r) for r in rows) if t.get("date") == wanted]
+
+
+def _fetch_today_transactions(account_id: int) -> list[dict]:
+    """Modo en tiempo real: las transacciones de hoy (hora de Colombia)."""
+    return _fetch_day_transactions(account_id)
 
 
 def _get_gmail_token(account_id: int) -> tuple[str | None, list[str]]:
@@ -207,9 +218,48 @@ def _get_gmail_token(account_id: int) -> tuple[str | None, list[str]]:
         return None, []
 
 
-def _build_tool_map(account_id: int) -> dict:
+def _prepare_transaction(inp: dict) -> tuple[dict, str | None, str | None]:
+    """Normaliza el payload de create_transaction y aplica las guardas deterministas.
+
+    Devuelve (payload, source_event_id, guard_reason). Si guard_reason no es None, la
+    transacción NO se crea. Compartido por el modo en tiempo real y el backfill (también
+    por su registrador de --dry-run), para que bloqueen y fuercen pending igual."""
     from agents.nightly import _normalize_transaction_payload
 
+    payload = _normalize_transaction_payload(inp)
+    source_event_id = (payload.get("metadata") or {}).get("source_event_id")
+    raw_text = " ".join(
+        str(value)
+        for value in [
+            payload.get("concept"),
+            payload.get("product"),
+            (payload.get("metadata") or {}).get("raw_text"),
+            (payload.get("metadata") or {}).get("subject"),
+        ]
+        if value
+    )
+    payload["source"] = "gmail"
+    guard_reason = transaction_guard_reason(raw_text)
+    if guard_reason:
+        logger.info(
+            "[GmailPush] blocked transaction source_event_id=%s reason=%s concept=%s",
+            source_event_id,
+            guard_reason,
+            payload.get("concept"),
+        )
+        return payload, source_event_id, guard_reason
+    if should_force_pending(raw_text) and payload.get("status") != "pending":
+        logger.info(
+            "[GmailPush] forcing pending inbound transfer source_event_id=%s concept=%s",
+            source_event_id,
+            payload.get("concept"),
+        )
+        payload["status"] = "pending"
+    return payload, source_event_id, None
+
+
+def _build_tool_map(account_id: int, *, notify: bool = True) -> dict:
+    """Herramientas del agente. notify=False (backfill) no emite eventos de UI por movimiento."""
     headers = build_auth_headers(str(account_id))
     category_cache: list[dict] = []
 
@@ -309,35 +359,9 @@ def _build_tool_map(account_id: int) -> dict:
 
     def create_transaction(inp: dict) -> dict:
         try:
-            payload = _normalize_transaction_payload(inp)
-            source_event_id = (payload.get("metadata") or {}).get("source_event_id")
-            raw_text = " ".join(
-                str(value)
-                for value in [
-                    payload.get("concept"),
-                    payload.get("product"),
-                    (payload.get("metadata") or {}).get("raw_text"),
-                    (payload.get("metadata") or {}).get("subject"),
-                ]
-                if value
-            )
-            payload["source"] = "gmail"
-            guard_reason = transaction_guard_reason(raw_text)
+            payload, source_event_id, guard_reason = _prepare_transaction(inp)
             if guard_reason:
-                logger.info(
-                    "[GmailPush] blocked transaction source_event_id=%s reason=%s concept=%s",
-                    source_event_id,
-                    guard_reason,
-                    payload.get("concept"),
-                )
                 return {"ok": True, "created": False, "ignored": True, "reason": guard_reason}
-            if should_force_pending(raw_text) and payload.get("status") != "pending":
-                logger.info(
-                    "[GmailPush] forcing pending inbound transfer source_event_id=%s concept=%s",
-                    source_event_id,
-                    payload.get("concept"),
-                )
-                payload["status"] = "pending"
 
             logger.info(
                 "[GmailPush] create_transaction amount=%s concept=%s type=%s source_event_id=%s",
@@ -355,7 +379,8 @@ def _build_tool_map(account_id: int) -> dict:
             if r.status_code == 201:
                 data = r.json()["data"]
                 logger.info("[GmailPush] create_transaction OK id=%s", data["id"])
-                notify_transaction_created(data, payload)
+                if notify:
+                    notify_transaction_created(data, payload)
                 return {"ok": True, "created": True, "id": data["id"],
                         "concept": data["attributes"]["concept"],
                         "amount": data["attributes"]["amount"],
@@ -469,6 +494,74 @@ Reglas críticas:
 """ + "\n\n" + TRANSACTION_CREATION_RULES
 
 
+def _prepare_email(msg: dict) -> tuple[dict | None, str | None]:
+    """Guardas previas al LLM, iguales en ambos modos. Devuelve (email, None) si va al
+    agente (marcado con force_pending si aplica) o (None, razón) si se ignora."""
+    should_ignore, reason = _should_ignore_email(msg)
+    if should_ignore:
+        return None, reason
+    if _force_pending_email(msg):
+        msg["force_pending"] = True
+    return msg, None
+
+
+def build_initial_message(emails: list[dict], day_txns: list[dict]) -> str:
+    """Mensaje inicial del agente: los correos del lote y el contexto anti-duplicados del día.
+
+    Si un correo trae "day" (solo el backfill, que procesa días pasados), se añade la línea
+    "Fecha: YYYY-MM-DD" con el día del correo; los del modo en tiempo real no lo traen."""
+    emails_text = "\n\n---\n\n".join(
+        f"[ID: {e['id']}]\nDe: {e['from']}\nAsunto: {e['subject']}\n"
+        + (f"Fecha: {e['day']}\n" if e.get("day") else "")
+        + f"Force pending: {'sí' if e.get('force_pending') else 'no'}\n\n{e['body']}"
+        for e in emails
+    )
+    initial_message = f"Procesa estos {len(emails)} correo(s) de Gmail:\n\n{emails_text}"
+
+    if day_txns:
+        already = "\n".join(
+            f"- id={t['id']} {t.get('type')} ${t.get('amount')} {(t.get('concept') or '').strip()}"
+            for t in day_txns
+        )
+        initial_message += (
+            "\n\n═══ TRANSACCIONES YA REGISTRADAS HOY (no las dupliques) ═══\n"
+            f"{already}\n\n"
+            "Un mismo pago suele llegar en DOS correos distintos (ej: notificación del banco + "
+            "confirmación del operador/PSE, o débito de cuenta + comprobante) con remitentes y "
+            "textos diferentes pero el MISMO monto. Si el movimiento de un correo ya está en la "
+            "lista de arriba (mismo monto y misma naturaleza, aunque el concepto difiera), NO lo "
+            "registres de nuevo. Lo mismo aplica entre los correos de este lote: si dos describen "
+            "el mismo pago, registralo una sola vez."
+        )
+    return initial_message
+
+
+def process_emails(
+    account_id: int,
+    emails: list[dict],
+    day_txns: list[dict],
+    *,
+    notify: bool = True,
+    tool_map: dict | None = None,
+    provider=None,
+    model: str | None = None,
+) -> str:
+    """Corre el agente sobre un lote de correos ya filtrados. Lo usan el modo en tiempo real
+    (contexto = hoy, notify=True) y el backfill (contexto = el día del lote, notify=False y
+    tool_map envuelto)."""
+    initial_message = build_initial_message(emails, day_txns)
+    tool_map = tool_map if tool_map is not None else _build_tool_map(account_id, notify=notify)
+    provider = provider or build_llm_provider()
+    return provider.run_agent(
+        system_prompt=SYSTEM_PROMPT,
+        tools=TOOLS,
+        tool_map=tool_map,
+        initial_message=initial_message,
+        max_iterations=10,
+        model=model or resolve_llm_model(),
+    )
+
+
 def run_gmail_push(account_id: int, history_id: str) -> None:
     """
     Procesa los correos nuevos desde history_id para el account dado.
@@ -490,13 +583,11 @@ def run_gmail_push(account_id: int, history_id: str) -> None:
     for mid in message_ids:
         msg = _fetch_message(access_token, mid)
         if msg:
-            should_ignore, reason = _should_ignore_email(msg)
-            if should_ignore:
+            email, reason = _prepare_email(msg)
+            if email is None:
                 logger.info("[GmailPush] ignoring email id=%s reason=%s", mid, reason)
                 continue
-            if _force_pending_email(msg):
-                msg["force_pending"] = True
-            emails.append(msg)
+            emails.append(email)
 
     if not emails:
         logger.info("[GmailPush] account=%s mensajes sin contenido útil", account_id)
@@ -504,39 +595,7 @@ def run_gmail_push(account_id: int, history_id: str) -> None:
 
     logger.info("[GmailPush] account=%s procesando %d correos", account_id, len(emails))
 
-    emails_text = "\n\n---\n\n".join(
-        f"[ID: {e['id']}]\nDe: {e['from']}\nAsunto: {e['subject']}\n"
-        f"Force pending: {'sí' if e.get('force_pending') else 'no'}\n\n{e['body']}"
-        for e in emails
-    )
-    initial_message = f"Procesa estos {len(emails)} correo(s) de Gmail:\n\n{emails_text}"
-
     today_txns = _fetch_today_transactions(account_id)
-    if today_txns:
-        already = "\n".join(
-            f"- id={t['id']} {t.get('type')} ${t.get('amount')} {(t.get('concept') or '').strip()}"
-            for t in today_txns
-        )
-        initial_message += (
-            "\n\n═══ TRANSACCIONES YA REGISTRADAS HOY (no las dupliques) ═══\n"
-            f"{already}\n\n"
-            "Un mismo pago suele llegar en DOS correos distintos (ej: notificación del banco + "
-            "confirmación del operador/PSE, o débito de cuenta + comprobante) con remitentes y "
-            "textos diferentes pero el MISMO monto. Si el movimiento de un correo ya está en la "
-            "lista de arriba (mismo monto y misma naturaleza, aunque el concepto difiera), NO lo "
-            "registres de nuevo. Lo mismo aplica entre los correos de este lote: si dos describen "
-            "el mismo pago, registralo una sola vez."
-        )
-
-    tool_map = _build_tool_map(account_id)
-    provider = build_llm_provider()
-    provider.run_agent(
-        system_prompt=SYSTEM_PROMPT,
-        tools=TOOLS,
-        tool_map=tool_map,
-        initial_message=initial_message,
-        max_iterations=10,
-        model=resolve_llm_model(),
-    )
+    process_emails(account_id, emails, today_txns)
 
     logger.info("[GmailPush] account=%s completado", account_id)

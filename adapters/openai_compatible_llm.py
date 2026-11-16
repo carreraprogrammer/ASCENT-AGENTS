@@ -57,6 +57,9 @@ class OpenAICompatibleLlmProvider(LlmProviderPort):
             raise ValueError(f"Missing API key for {provider_name} provider.")
         self._provider_name = provider_name
         self._default_model = default_model
+        # ASC-3: tokens acumulados de run_agent (los reporta el proveedor en "usage"); el backfill
+        # los usa para estimar el costo. No cambia lo que se envía ni lo que se devuelve.
+        self.usage_totals = {"prompt_tokens": 0, "completion_tokens": 0, "prompt_cache_hit_tokens": 0}
         self._client = httpx.Client(
             base_url=base_url.rstrip("/"),
             headers={
@@ -86,6 +89,14 @@ class OpenAICompatibleLlmProvider(LlmProviderPort):
                     )
                     time.sleep(wait)
         raise last_exc  # type: ignore[misc]
+
+    def _add_usage(self, usage) -> None:
+        if not isinstance(usage, dict):
+            return
+        for key in self.usage_totals:
+            value = usage.get(key)
+            if isinstance(value, (int, float)):
+                self.usage_totals[key] += int(value)
 
     def run_agent(
         self,
@@ -127,6 +138,7 @@ class OpenAICompatibleLlmProvider(LlmProviderPort):
                 ) from exc
 
             data = response.json()
+            self._add_usage(data.get("usage"))
             choice = (data.get("choices") or [{}])[0]
             message = choice.get("message") or {}
             finish_reason = choice.get("finish_reason")
