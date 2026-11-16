@@ -22,6 +22,27 @@ MANIFEST = {
     "scopes": ["ascent:read", "ascent:write"],
     "space": "ascent",
     "status": "available",
+    # TCW-2 (cerebro, ADR-0016): lo que muestra la página de Cromos. Las herramientas son las de cromo/server.py.
+    "app_url": "https://ascent.thecyborgway.dev",
+    "tools": [
+        {"name": "resumen_mes", "access": "read",
+         "description": {"es": "Ingresos, gastos y margen del mes.", "en": "The month's income, spending and margin."}},
+        {"name": "gasto_por_categoria", "access": "read",
+         "description": {"es": "Cuánto va cada categoría contra su presupuesto.",
+                         "en": "How each category is doing against its budget."}},
+        {"name": "obligaciones_proximas", "access": "read",
+         "description": {"es": "Pagos recurrentes que vencen pronto.", "en": "Recurring payments coming due."}},
+        {"name": "ultimos_movimientos", "access": "read",
+         "description": {"es": "Los movimientos más recientes.", "en": "The most recent transactions."}},
+        {"name": "registrar_gasto", "access": "write",
+         "description": {"es": "Registra un gasto en Ascent.", "en": "Records an expense in Ascent."}},
+    ],
+    "scope_descriptions": {
+        "ascent:read": {"es": "Leer tus finanzas en Ascent: resumen, categorías, obligaciones y movimientos.",
+                        "en": "Read your finances in Ascent: summary, categories, obligations and transactions."},
+        "ascent:write": {"es": "Registrar gastos en Ascent en tu nombre.",
+                         "en": "Record expenses in Ascent on your behalf."},
+    },
     "demo": {
         "claim": "demo",
         "effect": {
