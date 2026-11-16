@@ -307,13 +307,20 @@ Ascent es el primer cromo del cerebro de The Cyborg Way (https://thecyborgway.de
 
 | Ruta | Qué es |
 |------|--------|
-| `/.well-known/cromo.json` | El manifiesto: slug `ascent`, recurso canónico, scopes `ascent:read` y `ascent:write`, space `ascent` |
+| `/.well-known/cromo.json` | El manifiesto: slug `ascent`, recurso canónico, scopes `ascent:read` y `ascent:write`, space `ascent` y el contrato `demo` |
 | `/mcp` | Servidor MCP del cromo (`cromo/server.py`): `resumen_mes`, `gasto_por_categoria`, `obligaciones_proximas`, `ultimos_movimientos` (lectura) y `registrar_gasto` (`ascent:write`) |
 | `/.well-known/oauth-protected-resource/mcp` | Dice que los tokens los emite el cerebro |
 
 - **Tokens.** El MCP solo acepta JWT del cerebro (ES256, verificados con su JWKS) con `iss` = el cerebro,
   `aud` = `ASCENT_RESOURCE` y `exp` vigente (`cromo/tokens.py`). Un token del cerebro para el propio cerebro se
   rechaza: no hay passthrough. El cerebro llega con un token propio de Ascent, obtenido por token exchange.
+- **Modo demo (ASC-4).** Si el token intercambiado trae `"demo": true` (el cerebro lo agrega cuando el
+  intercambio pide `demo=true` o cuando el interruptor "Mostrar con datos de ejemplo" está activo para Ascent),
+  todas las herramientas leen la cuenta demo (`X-Account-Id` = el id que da `GET /api/v1/agent/accounts/demo`,
+  guardado 5 minutos) y nunca la del dueño; si ese id no se puede resolver, la herramienta falla.
+  `registrar_gasto` responde "modo demo: solo lectura". El manifiesto lo declara en `demo`. El scheduler llama
+  `POST /api/v1/agent/demo/reset` cada noche (05:00 UTC, medianoche en Colombia). El consolidado nunca sale de la
+  cuenta demo.
 - **Consolidado diario** (`cromo/consolidado.py`, 6am Colombia). Es una nota en
   `projects/ascent/episodic/runs/YYYY-MM-DD-consolidado.md` del cerebro, escrita con el cliente de máquina de
   Ascent (`client_credentials`, `brain:write`, solo el space `ascent`).

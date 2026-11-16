@@ -56,6 +56,11 @@ class RailsHttpAdapter(RailsApiPort):
     def __init__(self, account_id: str | None = None) -> None:
         self._account_id = str(account_id) if account_id else DEFAULT_ACCOUNT_ID
 
+    @property
+    def account_id(self) -> str:
+        """La cuenta sobre la que opera este adaptador (X-Account-Id)."""
+        return self._account_id
+
     def headers(self) -> dict:
         """Headers de autenticación escopados a esta cuenta."""
         return build_auth_headers(self._account_id)
@@ -95,6 +100,22 @@ class RailsHttpAdapter(RailsApiPort):
         resp = httpx.get(url, headers=build_service_headers(), timeout=TIMEOUT)
         resp.raise_for_status()
         return resp.json().get("data", [])
+
+    def get_demo_account_id(self) -> str:
+        """ASC-4: el id de la cuenta demo (GET /api/v1/agent/accounts/demo, service token sin X-Account-Id).
+        El cromo la usa cuando el token del cerebro trae demo: true. Responde {"data": {"id": ..., "demo": true}}."""
+        resp = httpx.get(f"{BASE_URL}/api/v1/agent/accounts/demo", headers=build_service_headers(), timeout=TIMEOUT)
+        resp.raise_for_status()
+        body = resp.json()
+        data = body.get("data", body) if isinstance(body, dict) else {}
+        return str(data.get("id") or data.get("account_id") or "") if isinstance(data, dict) else ""
+
+    def reset_demo(self) -> dict:
+        """ASC-4: restablece la cuenta demo con sus datos ficticios (POST /api/v1/agent/demo/reset). Scheduler."""
+        resp = httpx.post(f"{BASE_URL}/api/v1/agent/demo/reset", headers=build_service_headers(), timeout=TIMEOUT)
+        resp.raise_for_status()
+        body = resp.json()
+        return body.get("data", body) if isinstance(body, dict) else {}
 
     def renew_gmail_watches(self) -> dict:
         """

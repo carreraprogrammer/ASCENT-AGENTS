@@ -119,11 +119,15 @@ async def write_note(note: dict, token: str, issuer: str = BRAIN_ISSUER) -> dict
                 return {"error": text} if answer.is_error else json.loads(text)
 
 
-async def run(api) -> dict:
+async def run(api, demo_account_id: str | None = None) -> dict:
     """El trabajo diario del scheduler: arma el consolidado (en un hilo: la API de Rails es síncrona) y lo escribe
-    en el cerebro."""
+    en el cerebro. ASC-4: nunca desde la cuenta demo; si api apunta a ella, no se arma ni se envía nada."""
     if not os.environ.get("BRAIN_CLIENT_ID"):
         return {"skipped": "sin BRAIN_CLIENT_ID"}
+    account = str(getattr(api, "account_id", "") or "")
+    if demo_account_id and account == str(demo_account_id):
+        log.warning(json.dumps({"event": "consolidado", "skipped": "cuenta demo"}))
+        return {"skipped": "cuenta demo"}
     loop = asyncio.get_running_loop()
     note = await loop.run_in_executor(None, build, api)
     token = await loop.run_in_executor(None, machine_token)

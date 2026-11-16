@@ -5,6 +5,7 @@ Corre dentro del mismo proceso FastAPI.
 Horarios en UTC (Colombia = UTC-5):
   - Nightly:  04:00 UTC = 11:00pm Colombia
   - Insight:  07:00 UTC = 02:00am Colombia
+  - Demo:     05:00 UTC = 12:00am Colombia (ASC-4: reset de la cuenta demo)
 """
 
 import logging
@@ -93,6 +94,16 @@ def _make_scheduler() -> AsyncIOScheduler:
         replace_existing=True,
     )
 
+    # ── Reset de la cuenta demo — medianoche Colombia (05:00 UTC) ─────────────
+    # ASC-4: la demo vuelve cada noche a sus datos ficticios (POST /api/v1/agent/demo/reset).
+    scheduler.add_job(
+        func=_run_demo_reset,
+        trigger=CronTrigger(hour=5, minute=0),
+        id="demo_reset",
+        name="Reset nocturno de la cuenta demo",
+        replace_existing=True,
+    )
+
     # ── Keep-alive Rails API (cada 5 min) — evita cold start en Railway ──────
     scheduler.add_job(
         func=_ping_rails,
@@ -130,12 +141,28 @@ async def _run_auto_debits_all_accounts() -> None:
             logger.error("[auto_debits] account_id=%s — error: %s", account_id, e)
 
 
+async def _run_demo_reset() -> None:
+    """ASC-4: restablece la cuenta demo y olvida su id en caché (el cromo lo vuelve a pedir)."""
+    from adapters.rails_http import RailsHttpAdapter
+    from cromo.server import DEMO_ACCOUNT
+    loop = asyncio.get_event_loop()
+    try:
+        await loop.run_in_executor(None, RailsHttpAdapter().reset_demo)
+        logger.info("[demo_reset] ok")
+    except Exception as e:
+        logger.error("[demo_reset] error: %s", type(e).__name__)
+    finally:
+        DEMO_ACCOUNT.forget()
+
+
 async def _run_consolidado() -> None:
-    """El consolidado del dueño (MVP de un usuario: DANIEL15K_ACCOUNT_ID) al cerebro. Nunca registra cifras."""
+    """El consolidado del dueño (MVP de un usuario: DANIEL15K_ACCOUNT_ID) al cerebro. Nunca registra cifras.
+    ASC-4: nunca sale de la cuenta demo (consolidado.run lo comprueba con el id demo que da la API)."""
     from adapters.rails_http import RailsHttpAdapter
     from cromo import consolidado
+    from cromo.server import DEMO_ACCOUNT
     try:
-        result = await consolidado.run(RailsHttpAdapter())
+        result = await consolidado.run(RailsHttpAdapter(), demo_account_id=DEMO_ACCOUNT.get())
         logger.info("[consolidado] %s", "ok" if "error" not in result else "error del cerebro")
     except Exception as e:
         logger.error("[consolidado] error: %s", type(e).__name__)

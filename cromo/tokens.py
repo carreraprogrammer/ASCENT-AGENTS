@@ -5,7 +5,9 @@ Ascent solo acepta un JWT firmado por el cerebro (ES256, llaves de su JWKS) con:
   - aud = el recurso de Ascent (ASCENT_RESOURCE): un token del cerebro para el cerebro se rechaza (sin passthrough);
   - exp vigente;
   - los scopes que pide cada herramienta (ascent:read, ascent:write).
-Todo lo demás se rechaza. Las llaves se piden al JWKS y se guardan 5 minutos; una llave desconocida (rotación)
+Todo lo demás se rechaza. ASC-4: si el token trae el claim demo: true (el cerebro lo agrega cuando se pide con
+demo=true en el intercambio o con el interruptor "Mostrar con datos de ejemplo"), BrainAccessToken.demo es True y
+las herramientas leen la cuenta demo. Nunca se registra el contenido de un token. Las llaves se piden al JWKS y se guardan 5 minutos; una llave desconocida (rotación)
 fuerza una nueva lectura.
 """
 import os
@@ -18,6 +20,14 @@ from mcp.server.auth.provider import AccessToken
 BRAIN_ISSUER = os.environ.get("BRAIN_ISSUER", "https://thecyborgway.dev")
 ASCENT_RESOURCE = os.environ.get("ASCENT_RESOURCE", "https://daniel15k-agents-production.up.railway.app/mcp")
 JWKS_TTL = 300
+
+
+DEMO_CLAIM = "demo"
+
+
+class BrainAccessToken(AccessToken):
+    """El AccessToken del SDK, más demo: True solo si el token del cerebro trae el claim demo: true (booleano)."""
+    demo: bool = False
 
 
 class Keys:
@@ -57,10 +67,10 @@ class BrainTokenVerifier:
         except (jwt.PyJWTError, httpx.HTTPError, ValueError):
             return None
 
-    async def verify_token(self, token: str) -> AccessToken | None:
+    async def verify_token(self, token: str) -> BrainAccessToken | None:
         found = self.claims(token)
         if not found:
             return None
-        return AccessToken(token=token, client_id=str(found.get("client_id") or "brain"),
-                           scopes=str(found.get("scope", "")).split(), expires_at=int(found["exp"]),
-                           resource=self.resource, subject=found["sub"])
+        return BrainAccessToken(token=token, client_id=str(found.get("client_id") or "brain"),
+                                scopes=str(found.get("scope", "")).split(), expires_at=int(found["exp"]),
+                                resource=self.resource, subject=found["sub"], demo=found.get(DEMO_CLAIM) is True)
