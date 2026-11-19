@@ -103,7 +103,7 @@ def test_expense_never_keeps_income_category():
     payload = {"transaction_type": "expense", "category_code": "income",
                "subcategory_code": "otros_ingreso", "status": "confirmed"}
     assert sanitize_expense_category(payload) is True
-    assert payload == {"transaction_type": "expense", "status": "pending"}
+    assert payload == {"transaction_type": "expense", "category_code": "unknown", "status": "confirmed"}
 
     income = {"transaction_type": "income", "category_code": "income", "subcategory_code": "salario"}
     assert sanitize_expense_category(income) is False

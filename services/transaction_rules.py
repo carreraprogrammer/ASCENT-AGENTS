@@ -174,7 +174,7 @@ BOLSILLOS: "Retiro de bolsillo a la cuenta", "Traslado a bolsillo" y similares s
 de cajón dentro del mismo banco → NO registrar (ni ingreso ni gasto).
 
 Un GASTO nunca lleva category_code="income" ni una subcategoría de ingreso (salario, freelance,
-reembolso, arriendo_recibido, otros_ingreso). Si no sabés qué es, dejalo sin subcategoría y pending.
+reembolso, arriendo_recibido, otros_ingreso). Si no sabés qué es, usá category_code="unknown" sin subcategoría.
 """
 
 
@@ -199,16 +199,16 @@ def transaction_guard_reason(text: str) -> str | None:
 
 def sanitize_expense_category(payload: dict) -> bool:
     """Un gasto nunca lleva categoría de ingreso. Si el agente la puso (pasaba con
-    transferencias a llaves), se borra y el gasto queda pending para revisión.
+    transferencias a llaves), se cambia a category_code="unknown" sin subcategoría. El
+    estado no se toca: el usuario no quiere transacciones pendientes por esto.
     Devuelve True si corrigió algo."""
     if payload.get("transaction_type") != "expense":
         return False
     wrong = payload.get("category_code") == "income" or payload.get("subcategory_code") in INCOME_SUBCATEGORY_CODES
     if not wrong:
         return False
-    payload.pop("category_code", None)
+    payload["category_code"] = "unknown"
     payload.pop("subcategory_code", None)
-    payload["status"] = "pending"
     return True
 
 
