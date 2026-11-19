@@ -26,6 +26,7 @@ from services.transaction_rules import (
     TRANSACTION_CREATION_RULES,
     normalize_categories,
     quick_category_buttons,
+    sanitize_expense_category,
     should_force_pending,
     transaction_guard_reason,
 )
@@ -248,6 +249,12 @@ def _prepare_transaction(inp: dict) -> tuple[dict, str | None, str | None]:
             payload.get("concept"),
         )
         return payload, source_event_id, guard_reason
+    if sanitize_expense_category(payload):
+        logger.info(
+            "[GmailPush] removed income category from expense source_event_id=%s concept=%s",
+            source_event_id,
+            payload.get("concept"),
+        )
     if should_force_pending(raw_text) and payload.get("status") != "pending":
         logger.info(
             "[GmailPush] forcing pending inbound transfer source_event_id=%s concept=%s",

@@ -396,7 +396,26 @@ def build_tool_map(api: RailsApiPort, messenger: MessengerPort,
     def create_transaction(inp: dict) -> dict:
         try:
             import httpx
+            from services.transaction_rules import (
+                sanitize_expense_category,
+                should_force_pending,
+                transaction_guard_reason,
+            )
             payload = _normalize_transaction_payload(inp)
+            # Mismas guardas deterministas que el modo en tiempo real (gmail_push): el
+            # nocturno es la red de seguridad de Gmail y antes creaba sin ninguna.
+            meta = payload.get("metadata") or {}
+            raw_text = " ".join(
+                str(v) for v in [payload.get("concept"), payload.get("product"),
+                                 meta.get("raw_text"), meta.get("subject")] if v
+            )
+            if payload.get("source") == "gmail":
+                guard_reason = transaction_guard_reason(raw_text)
+                if guard_reason:
+                    return {"ok": True, "created": False, "ignored": True, "reason": guard_reason}
+                if should_force_pending(raw_text):
+                    payload["status"] = "pending"
+            sanitize_expense_category(payload)
             r = httpx.post(
                 f"{API_BASE_URL}/api/v1/transactions",
                 headers=api.headers(),

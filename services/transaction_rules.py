@@ -50,6 +50,18 @@ SELF_TRANSFER_RE = build_self_transfer_re(
     os.environ.get("OWNER_TRANSFER_KEY", ""),
 )
 
+# Movimientos entre la cuenta y sus bolsillos (Davivienda "Retiro de bolsillo a la cuenta",
+# "Traslado a bolsillo"). Es la misma plata del usuario cambiando de cajón: ni ingreso ni
+# gasto. Los aportes a bolsillo no se registran como gasto (RFC-0001), así que contar el
+# retiro como ingreso duplicaba esa plata en "lo que tienes hoy".
+POCKET_TRANSFER_RE = re.compile(
+    r"(retiro|traslado|transferencia|abono|aporte|env[ií]o)\s+(de|a|al|desde|hacia)\s+(tu\s+|un\s+|el\s+)?bolsillo"
+    r"|bolsillo\s+(a|hacia)\s+(la|tu)\s+cuenta",
+    re.IGNORECASE,
+)
+
+INCOME_SUBCATEGORY_CODES = {"salario", "freelance", "reembolso", "arriendo_recibido", "otros_ingreso"}
+
 INBOUND_TRANSFER_RE = re.compile(
     r"(abono|transferencia|recibiste|recibido).*(bre-b|llave|cta\s+de\s+ahorros|cuenta\s+de\s+ahorros)",
     re.IGNORECASE,
@@ -157,6 +169,12 @@ Una llave puede ser de OTRA persona → es un pago real (gasto). Como el banco n
 llave, registrala SIEMPRE como gasto pending (payment_source="debit", status="pending") para que el
 usuario confirme si fue pago a un tercero o movimiento interno. Nunca la ignores por completo.
 Si hay duda real sobre si es ingreso externo o movimiento interno, crea una transacción pending para revisión.
+
+BOLSILLOS: "Retiro de bolsillo a la cuenta", "Traslado a bolsillo" y similares son plata tuya cambiando
+de cajón dentro del mismo banco → NO registrar (ni ingreso ni gasto).
+
+Un GASTO nunca lleva category_code="income" ni una subcategoría de ingreso (salario, freelance,
+reembolso, arriendo_recibido, otros_ingreso). Si no sabés qué es, dejalo sin subcategoría y pending.
 """
 
 
@@ -174,7 +192,24 @@ def transaction_guard_reason(text: str) -> str | None:
         return "credit_card_payment"
     if SELF_TRANSFER_RE.search(text):
         return "self_transfer"
+    if POCKET_TRANSFER_RE.search(text):
+        return "pocket_transfer"
     return None
+
+
+def sanitize_expense_category(payload: dict) -> bool:
+    """Un gasto nunca lleva categoría de ingreso. Si el agente la puso (pasaba con
+    transferencias a llaves), se borra y el gasto queda pending para revisión.
+    Devuelve True si corrigió algo."""
+    if payload.get("transaction_type") != "expense":
+        return False
+    wrong = payload.get("category_code") == "income" or payload.get("subcategory_code") in INCOME_SUBCATEGORY_CODES
+    if not wrong:
+        return False
+    payload.pop("category_code", None)
+    payload.pop("subcategory_code", None)
+    payload["status"] = "pending"
+    return True
 
 
 def should_force_pending(text: str) -> bool:
