@@ -87,3 +87,24 @@ def test_without_identity_nothing_is_a_self_transfer():
     assert mod.should_force_pending("Envío por Bre-B a ANA PEREZ") is True
     # La regla de pago de tarjeta no depende de la identidad.
     assert mod.transaction_guard_reason("Pago Tarjeta de Crédito por $300.000") == "credit_card_payment"
+
+
+def test_pocket_movements_are_internal_transfers():
+    from services.transaction_rules import transaction_guard_reason
+
+    assert transaction_guard_reason("Retiro de bolsillo a la cuenta") == "pocket_transfer"
+    assert transaction_guard_reason("Traslado a bolsillo viaje") == "pocket_transfer"
+    assert transaction_guard_reason("Abono transferencia ACH") is None
+
+
+def test_expense_never_keeps_income_category():
+    from services.transaction_rules import sanitize_expense_category
+
+    payload = {"transaction_type": "expense", "category_code": "income",
+               "subcategory_code": "otros_ingreso", "status": "confirmed"}
+    assert sanitize_expense_category(payload) is True
+    assert payload == {"transaction_type": "expense", "category_code": "unknown", "status": "confirmed"}
+
+    income = {"transaction_type": "income", "category_code": "income", "subcategory_code": "salario"}
+    assert sanitize_expense_category(income) is False
+    assert income["subcategory_code"] == "salario"
